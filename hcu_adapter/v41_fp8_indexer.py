@@ -159,6 +159,16 @@ def resolve_graph_capture_allowed():
     return graph_capture_allowed if resolver is None else resolver()
 
 
+def fp4_decode_graph_capture_allowed(config) -> bool:
+    """Ask the FP4 owner about its GPU-only decode reader.
+
+    This does not admit the host-metadata FP8 reference. Without an active
+    plugin publishing the narrower FP4 contract, full capture stays refused.
+    """
+    resolver = _resolvers.get("fp4_graph_allowed")
+    return False if resolver is None else bool(resolver()(config))
+
+
 def build():
     """Resolve the reference implementation against the imported vLLM.
 
