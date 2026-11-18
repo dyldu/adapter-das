@@ -50,16 +50,18 @@ def applicable(cfg):
 def _graph_capture_allowed(cfg):
     """Admit the capture mode through the adapter-owned graph contract.
 
-    ``graph_capture_allowed`` is a vLLM ``CompilationConfig`` rule (breakable
-    PIECEWISE admitted, full cudagraph rejected), not plugin mechanism, so it
-    lives in ``hcu_adapter.v41_fp8_indexer``. That module hands back the
-    predicate this process admits by: an activated plugin binds a zero-argument
-    hook that reads its historical module object, so a patch there still reaches
-    this check. The import is lazy so this admission module stays importable
-    before the plugin activates and in adapter-only CPU tests.
+    The general indexer contract admits breakable PIECEWISE and rejects full
+    capture of the host-metadata FP8 reference. A separate owner-published
+    predicate can admit FP4's device-only decode reader with PIECEWISE prefill.
+    Both predicates are resolved lazily so adapter-only CPU admission remains
+    importable before plugin activation.
     """
-    from hcu_adapter.v41_fp8_indexer import resolve_graph_capture_allowed
-    return bool(resolve_graph_capture_allowed()(cfg))
+    from hcu_adapter.v41_fp8_indexer import (
+        fp4_decode_graph_capture_allowed,
+        resolve_graph_capture_allowed,
+    )
+    return (bool(resolve_graph_capture_allowed()(cfg))
+            or fp4_decode_graph_capture_allowed(cfg))
 
 
 def validate_config(cfg):
@@ -108,8 +110,7 @@ def validate_config(cfg):
         errors.append('LoRA unsupported')
     if not cfg.use_v2_model_runner or not (
             cfg.model_config.enforce_eager or _graph_capture_allowed(cfg)):
-        errors.append('eager MRV2 or PIECEWISE breakable Graph required; '
-                      'full cudagraph is not admitted')
+        errors.append('eager MRV2 or an admitted indexer Graph required')
     # JIT warmup is NOT rejected here: `register_warmup()` only queues a compile
     # key with `JitWarmupRegistry`, so the owner kernels are still unhashed when
     # the packer rebinds them during model construction. The plugin's
