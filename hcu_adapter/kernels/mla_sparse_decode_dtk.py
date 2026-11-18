@@ -48,6 +48,14 @@ def _selectors_supported(dense, lengths, flat, indptr, q):
 
 
 def _selectors(dense, lengths, flat, indptr, rows, num_slots):
+    from .mla_selectors import try_selectors
+    compact = try_selectors(dense, lengths, flat, indptr, rows, num_slots)
+    if compact is not None:
+        return compact
+    return _selectors_torch(dense, lengths, flat, indptr, rows, num_slots)
+
+
+def _selectors_torch(dense, lengths, flat, indptr, rows, num_slots):
     """CSR to padded dense, then compact invalid slots before vendor lengths.
 
     Never read indptr[-1] or any dynamic length on the host. Keep duplicate
