@@ -27,7 +27,22 @@ tests/adapter/test_mla_selectors_contract.py tests/adapter/test_vllm_flashmla_de
 for CPU checks. On gfx938 run `python tests/tools/probe_mla_selectors.py --output
 <result.json>` with this adapter and the installed native FlashMLA/vLLM binaries.
 
-HE32 and paired unprofiled serving/profile checks are pending. The additional
-SLA is frozen before measurement against accepted target Q/KV, retaining all
-earlier gates. Raw evidence is under
-`/public2/home/duyunlong/run/dsv4.1/033/moe_reverify_20261118/mla_selectors_*`.
+HE32 passes **32/32**, identical baseline tasks/prompts, zero errors/truncations,
+with real prefill and speculative acceptance. Two unprofiled 64-request repeats
+complete without failures: median TPOT **22.87067 / 22.56973 ms**, mean of repeat
+medians **22.72020 ms**. This is 14.834% below the accepted target Q/KV control
+and 38.623% below the original frozen baseline. All original and additional
+2% matched/aggregate ceilings frozen before measurement pass. Two repeats
+provide an observed comparison, without a statistical confidence claim.
+
+The separate profile and workflow exit 0 and export eight traces. Every rank
+selects 780 target selector kernels per ten target steps, mean 8.206..8.320 us.
+Draft selects 27 calls on rank4 and 30 on other ranks, exactly matching each
+rank's native draft Q/KV invocation count, mean 6.495..6.692 us. Target phase
+medians are 85.534..85.690 ms; draft/sampling medians 6.868..7.029 ms. Median
+GPU idle fractions are 1.662..1.711% and 1.366..1.478%, respectively. The
+provided SGLang trace differs in hardware/context metadata, and complete
+SGLang step parity remains unproven.
+
+Validated production source: `161e27b`, companion plugin `06e7912`. Raw evidence
+is under `/public2/home/duyunlong/run/dsv4.1/033/moe_reverify_20261118/mla_selectors_*`.
