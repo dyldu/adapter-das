@@ -461,6 +461,9 @@ def hcu_runtime_plugin() -> None:
         _ensure_hcu_platform_selected()
         configure_vllm_hip_runtime_path()
         _require_vllm_hip_runtime_abi()
+        from hcu_adapter.aiter_torch_library import install as install_aiter_library
+
+        install_aiter_library()
         from hcu_adapter.bridges.vllm_fp8 import install as install_fp8_fallback
 
         install_fp8_fallback()

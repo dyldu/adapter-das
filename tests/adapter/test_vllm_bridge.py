@@ -280,7 +280,20 @@ def test_runtime_plugin_runs_guards_then_extensions_once_and_keeps_reports(
     # Provider registration has its own contract tests; do not enter a real
     # platform import from this guard/extension ordering double on either arch.
     from hcu_adapter.bridges import vllm_fp8
+    from hcu_adapter.bridges import vllm_mhc
+    from hcu_adapter import aiter_torch_library
     monkeypatch.setattr(vllm_fp8, "install", lambda: calls.append("fp8"))
+    from importlib import import_module
+    for owner in ("vllm_scaled_mm", "vllm_mhc", "vllm_sparse_indexer",
+                  "vllm_flashmla", "vllm_flashmla_decode", "vllm_pcp"):
+        module = import_module(f"hcu_adapter.bridges.{owner}")
+        monkeypatch.setattr(module, "install", lambda: None)
+        if hasattr(module, "require_healthy"):
+            monkeypatch.setattr(module, "require_healthy", lambda: None)
+    from hcu_adapter.bridges import vllm_allreduce
+    monkeypatch.setattr(vllm_allreduce, "prepare_runtime", lambda: None)
+    monkeypatch.setattr(aiter_torch_library, "install",
+                        lambda: calls.append("aiter-library"))
     monkeypatch.setattr(
         bridge,
         "_installed_adapter_version",
@@ -304,6 +317,7 @@ def test_runtime_plugin_runs_guards_then_extensions_once_and_keeps_reports(
         "platform",
         "dtk",
         "runtime-abi",
+        "aiter-library",
         "fp8",
         "adapter-version",
         ("extensions", "0.1.0", "0.32.0+rocm723"),
