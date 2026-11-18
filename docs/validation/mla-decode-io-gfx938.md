@@ -21,9 +21,26 @@ queries, sinks and outputs, magnitudes 0/.001/.25/1/8/100 and changing Q,
 cache, positions, sinks and main/extra selectors. Native ABI is the installed
 FlashMLA 1.2.0+dtk2610 wheel. No plan caching is introduced.
 
-At M48/H64, complete-bridge graph timing is 151.23 -> 117.09 us for SWA-only
-and 224.26 -> 185.13 us for combined attention. These are isolated timings;
-HumanEval and formal serving admission remain pending.
+At M48/H64, final-source complete-bridge graph timing is 151.005 -> 117.906 us
+for SWA-only and 219.794 -> 185.072 us for combined attention. Both final
+CPU and GPU checks pass; production source is 03ef92e.
+
+HumanEval first32 passes 32/32 with identical baseline tasks/prompts, zero
+errors/truncations and real prefill/acceptance. Both unprofiled 64-request
+repeats complete with zero failures: median TPOT 22.223018363 / 21.874368957 ms,
+mean of repeat medians 22.048693660 ms. All frozen matched/aggregate and prior
+SLA gates pass. This is 2.956% below the accepted selector control and 40.437%
+below the original baseline, based on two repeats without a confidence claim.
+
+The separate profile and workflow exit zero with eight traces. Each rank
+selects 400 target and 30 draft mask/copy kernels per ten steps; target mean
+8.217..8.361 us, draft 6.532..6.731 us. Existing target Q/KV/Post and native
+draft Q/KV paths remain selected. Phase medians: target 82.611..82.812 ms,
+draft/sampling 6.755..6.902 ms. Median GPU idle fractions are 0.881..0.922%
+and 0.746..0.780%. Full SGLang stage parity remains incomplete.
+
+Measured plugin is ec93021 (production model code a4687f8). Subsequent retained
+plugin test CRLF/module EOF normalization has an identical Python AST.
 
 Run CPU checks with HCU_ADAPTER_HOST=none and the three tests in
 `tests/adapter/test_mla_decode_io.py`, `test_mla_selectors_contract.py` and
