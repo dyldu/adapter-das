@@ -352,6 +352,10 @@ class MhcAiterRuntime:
             return torch.empty_like(residual)
         *outer, hc, hidden = residual.shape
         tensors = (x, residual, post_layer_mix, comb_res_mix)
+        if hidden == 5120 and self.provider.post is not None:
+            from .mhc_post_5120 import post_5120, supported as post_supported
+            if post_supported(x, residual, post_layer_mix, comb_res_mix):
+                return post_5120(x, residual, post_layer_mix, comb_res_mix)
         width_matches_history = hidden != 5120
         supported = (hc == 4 and hidden >= 1024 and hidden % 1024 == 0
                      and width_matches_history  # No historical Post v3 acceptance at this width.
