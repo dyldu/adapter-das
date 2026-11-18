@@ -1,4 +1,4 @@
-# gfx938 H5120 Post candidate
+# gfx938 H5120 Post validation
 
 The existing H5120 AITER route deliberately uses the official Torch Post.
 Its FP32 `einsum` and separate pointwise/cast operations are visible in the
@@ -37,11 +37,35 @@ Source89cc71d, nmz18 / duyl-033-1112, Torch2.13 DTK2610:
 | 128 | 505.408 | 18.008 |
 | 1024 | 3931.653 | 146.002 |
 
-These timings do not establish serving performance. HE32 and paired unprofiled
-serving/profile validation are pending at this snapshot. Retain the original
+These isolated timings are separate from serving performance. Retain the original
 SLA and additional matched ceilings32.512422146964965 /32.19653568146237ms,
 aggregate32.35447891421367ms, frozen before serving measurements against the
 accepted model-entry-clean control.
+
+## Serving validation
+
+Plugin902a1fa, adapter production89cc71d, FULL_AND_PIECEWISE and explicit IPC LL:
+
+- HE32 passes32/32 with identical baseline tasks/prompts, zero errors and
+  truncations, real prefill and speculative acceptance, workflow0.
+- Paired unprofiled medians28.18078645 /27.10076389ms, aggregate27.64077517ms
+  (mean of repeat medians);64/64requests, failed0 each. Original, DSpark and
+  additional Post matched/aggregate SLA gates all pass without relaxation.
+- The aggregate is12.860% below the model-entry-clean control31.72007737ms and
+  25.331% below the original PIECEWISE baseline37.01764291ms. Both repeats move
+  in the same direction; this is not a statistical confidence estimate.
+- Independent profile and workflow exit0, eight rank traces. Every rank records
+  830target Post calls per10steps at9.51..9.67us mean, replacing all830target
+  FP32 Post BMMs. Draft records50new calls at7.58..7.87us. Its final direct
+  Torch Post remains10calls and is not claimed as replaced.
+- Profiled target phase median106.42..106.59ms and draft+sampling7.65..7.79ms;
+  median idle fractions2.54..2.62% /1.99..2.05%. These profiled phase spans
+  differ from unprofiled TPOT and SGLang's supplied annotation windows.
+
+Target shared activation remains about8.5us versus SGLang5.4us. Full step and
+MoE stage parity remains incomplete. The SGLang trace uses BW1100 with more
+memory, while this validation uses BW1101. Neither trace records BMM input
+dimensions; batch annotations alone do not prove all intermediate shapes match.
 
 Reproduce on an idle GPU with this worktree on `PYTHONPATH`:
 
@@ -56,3 +80,5 @@ HCU_ADAPTER_HOST=none python tests/tools/probe_mhc_post_5120.py --output post.js
 
 Full artifacts: `/public2/home/duyunlong/run/dsv4.1/033/moe_reverify_20261118/`
 `mhc_post_{cpu_v1.log,production_v1.json,production_v1.log,preflight_sla.json}`.
+Serving artifacts: `mhc_post_v1_{he32_summary.json,perf_summary.json,stages.json,
+gaps.json}` and the corresponding `he32/` and `pair/` directories.
