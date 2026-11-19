@@ -1,0 +1,102 @@
+{
+  "accepted": true,
+  "comparison": {
+    "sla_passed": true,
+    "speedup_claim_passed": false,
+    "control_mean_ms": 19.846486861773542,
+    "candidate_mean_ms": 19.75580607724237,
+    "mean_improvement": 0.0045691101484481855,
+    "repeats": [
+      {
+        "control_median_ms": 20.12241383882489,
+        "candidate_median_ms": 19.923698870230496,
+        "control_p99_ms": 23.79288778358,
+        "candidate_p99_ms": 23.46298953562271,
+        "improvement": 0.009875304731631451,
+        "median_pass": true,
+        "p99_pass": true,
+        "speedup_claim_pass": false
+      },
+      {
+        "control_median_ms": 19.570559884722194,
+        "candidate_median_ms": 19.58791328425424,
+        "control_p99_ms": 24.297764317029866,
+        "candidate_p99_ms": 24.505891630492044,
+        "improvement": -0.0008867094060804881,
+        "median_pass": true,
+        "p99_pass": true,
+        "speedup_claim_pass": false
+      }
+    ]
+  },
+  "sources": {
+    "plugin": {
+      "path": "/duyl/vllm-hcu033-wt-w4a8-dspark-default-deepep-20261119",
+      "commit": "a5bc072d0a1cb80f97f1a69db771a09525f79d09",
+      "tracked_dirty": false
+    },
+    "adapter": {
+      "path": "/duyl/adapter-das-wt-w4a8-mhc-post-launch-20261119",
+      "commit": "18c695303a0548b134a39a1a34c4f0ce4b472391",
+      "tracked_dirty": false
+    }
+  },
+  "full_accuracy": {
+    "passed": 159,
+    "total": 164,
+    "first32_passed": 32,
+    "errors": 0,
+    "missing_outputs": 0,
+    "truncated": 0
+  },
+  "unit_gate_sha256": "99fcf04c5e9f313665a214a5fb19ddbbb595e7ae882bae14c615cfacdc884aec",
+  "all8_actual_dispatch_passed": true,
+  "limits": "Exact existing Post arithmetic, changed launch geometry. Require unchanged regression SLA; a separate >=2% per-repeat gate controls end-to-end speedup claims. FakeKV performance and real-prefill accuracy remain separate.",
+  "tested_plugin": "a5bc072d0a1cb80f97f1a69db771a09525f79d09",
+  "tested_adapter": "18c695303a0548b134a39a1a34c4f0ce4b472391",
+  "eager_cases": 720,
+  "changing_graph_replays": 480,
+  "post_unit_probe_sha256": "99fcf04c5e9f313665a214a5fb19ddbbb595e7ae882bae14c615cfacdc884aec",
+  "service_gate_sha256": "c7fa773c4b25a460cb8469e5a73bc50b75a2d0a67207188289ae7e7e9d38d677",
+  "accuracy_gate_sha256": "1abc41028f11d0b4c323d4462ad86c685eb8c537a90cc5efdcb64a2b2aa15f45",
+  "trace_sha256": [
+    {
+      "path": "/duyl/run/dsv4.1/033/w4a8_reverify_20261119/nmz18/mhc_post_launch_service_20261119/performance/20261119_231113_prof_w4_OoE2P4/torch_profiler/dp0_pp0_tp0_dcp0_ep0_rank0.1795101712535316703.pt.trace.json.gz",
+      "sha256": "baca19354452704be7a8271815dc1a76ed3db3865d81f710d4f640dc2c1b4f49"
+    },
+    {
+      "path": "/duyl/run/dsv4.1/033/w4a8_reverify_20261119/nmz18/mhc_post_launch_service_20261119/performance/20261119_231113_prof_w4_OoE2P4/torch_profiler/dp1_pp0_tp0_dcp0_ep1_rank0.1795101712493713681.pt.trace.json.gz",
+      "sha256": "81bd3ed96d4445a7e9bc4d62b6b26780bdc35106e9b0f13ff9c7089f6a6f3450"
+    },
+    {
+      "path": "/duyl/run/dsv4.1/033/w4a8_reverify_20261119/nmz18/mhc_post_launch_service_20261119/performance/20261119_231113_prof_w4_OoE2P4/torch_profiler/dp2_pp0_tp0_dcp0_ep2_rank0.1795101718417414676.pt.trace.json.gz",
+      "sha256": "7a4aefad5539d6740b3b5cd3165464226867616e5ef817323f36e56d2dab852d"
+    },
+    {
+      "path": "/duyl/run/dsv4.1/033/w4a8_reverify_20261119/nmz18/mhc_post_launch_service_20261119/performance/20261119_231113_prof_w4_OoE2P4/torch_profiler/dp3_pp0_tp0_dcp0_ep3_rank0.1795101718529574403.pt.trace.json.gz",
+      "sha256": "f9fe7dd198ab06bd167263e8df998828b2cfe58d70e591de685af1a170633162"
+    },
+    {
+      "path": "/duyl/run/dsv4.1/033/w4a8_reverify_20261119/nmz18/mhc_post_launch_service_20261119/performance/20261119_231113_prof_w4_OoE2P4/torch_profiler/dp4_pp0_tp0_dcp0_ep4_rank0.1795101718443554062.pt.trace.json.gz",
+      "sha256": "ee5b3fb3bb6206116c1c391813500a71ac26b5a261668616a1fb6ab4bb81f6f3"
+    },
+    {
+      "path": "/duyl/run/dsv4.1/033/w4a8_reverify_20261119/nmz18/mhc_post_launch_service_20261119/performance/20261119_231113_prof_w4_OoE2P4/torch_profiler/dp5_pp0_tp0_dcp0_ep5_rank0.1795101718537965593.pt.trace.json.gz",
+      "sha256": "d5fb6587ef1d8b7ba05f1ee35bd9fec5446cbac6424ee873f9a7dbb850241c95"
+    },
+    {
+      "path": "/duyl/run/dsv4.1/033/w4a8_reverify_20261119/nmz18/mhc_post_launch_service_20261119/performance/20261119_231113_prof_w4_OoE2P4/torch_profiler/dp6_pp0_tp0_dcp0_ep6_rank0.1795101718626547151.pt.trace.json.gz",
+      "sha256": "4faa92309893794c1225283913f8363cbac262b0cf99f1853cb59e46d2f2c92c"
+    },
+    {
+      "path": "/duyl/run/dsv4.1/033/w4a8_reverify_20261119/nmz18/mhc_post_launch_service_20261119/performance/20261119_231113_prof_w4_OoE2P4/torch_profiler/dp7_pp0_tp0_dcp0_ep7_rank0.1795101712645993526.pt.trace.json.gz",
+      "sha256": "e13f34937e3143c4bb4600da25438f1efe393e0aca678552819cc3ae62952603"
+    }
+  ],
+  "single_step": {
+    "candidate_ms": 80.68387695312501,
+    "prior_ms": 80.86167797851563,
+    "sglang_reference_ms": 65.09827392578126,
+    "sglang_stage_reference_only": true
+  }
+}
