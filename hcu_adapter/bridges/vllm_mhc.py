@@ -195,6 +195,8 @@ def _declare_aiter(mhc, kernels, ir, backend, provider, split_k):
     torch = import_module('torch')
     runtime = backend.MhcAiterRuntime(provider, kernels, ir.ops.rms_norm,
         torch.ops.vllm.mhc_pre_mix_triton, torch.ops.vllm.hc_collapse_triton, split_k)
+    from hcu_adapter.kernels.mhc_boundary_triton import boundary as run_boundary
+    from hcu_adapter.kernels.mhc_boundary_triton import supported as boundary_supported
 
     def execute(function, *args):
         require_healthy()
@@ -232,6 +234,18 @@ def _declare_aiter(mhc, kernels, ir, backend, provider, split_k):
              comb_res_mix: torch.Tensor) -> torch.Tensor:
         return execute(runtime.post, x, residual, post_layer_mix, comb_res_mix)
 
+    def boundary(residual: torch.Tensor, sublayer_out: torch.Tensor,
+                 post_layer_mix: torch.Tensor, comb_res_mix: torch.Tensor,
+                 fn: torch.Tensor, hc_scale: torch.Tensor, hc_base: torch.Tensor,
+                 pre_mix: torch.Tensor | None, norm_weight: torch.Tensor | None,
+                 norm_eps: float
+                 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        updated, post_mix, comb_mix, layer, next_pre = execute(
+            run_boundary, residual, fn, hc_scale, hc_base, pre_mix,
+            sublayer_out, post_layer_mix, comb_res_mix)
+        normed = execute(runtime._norm, layer, norm_weight, norm_eps)
+        return updated, post_mix, comb_mix, normed, next_pre
+
     def pre_fake(residual, fn, hc_scale, hc_base, rms_eps, hc_pre_eps, hc_sinkhorn_eps,
                  hc_post_mult_value, sinkhorn_repeat, n_splits=1, norm_weight=None, norm_eps=0.0):
         *outer, c, h = residual.shape
@@ -254,6 +268,15 @@ def _declare_aiter(mhc, kernels, ir, backend, provider, split_k):
     def post_fake(x, residual, post_layer_mix, comb_res_mix):
         return torch.empty_like(residual)
 
+    def boundary_fake(residual, sublayer_out, post_layer_mix, comb_res_mix,
+                      fn, hc_scale, hc_base, pre_mix, norm_weight, norm_eps):
+        m, c, h = residual.shape
+        return (torch.empty_like(residual),
+                residual.new_empty((m, c, 1), dtype=torch.float32),
+                residual.new_empty((m, c, c), dtype=torch.float32),
+                residual.new_empty((m, h)),
+                residual.new_empty((m, c), dtype=torch.float32))
+
     class HcuMHCPreOp(mhc.MHCPreOp):
         def forward_hip(self, residual, fn, hc_scale, hc_base, rms_eps, hc_pre_eps, hc_sinkhorn_eps,
                         hc_post_mult_value, sinkhorn_repeat, n_splits=1, norm_weight=None, norm_eps=0.0):
@@ -274,6 +297,14 @@ def _declare_aiter(mhc, kernels, ir, backend, provider, split_k):
                         x=None, norm_weight=None, norm_eps=1e-6, sublayer_out=None,
                         post_layer_mix=None, comb_res_mix=None):
             require_healthy()
+            if (x is None and split_k == 'auto' and provider.project is not None
+                    and provider.tilelang_enabled and provider.tilelang_pre is not None
+                    and boundary_supported(residual, fn, hc_scale, hc_base, pre_mix,
+                        sublayer_out, post_layer_mix, comb_res_mix, rms_eps, hc_pre_eps,
+                        hc_sinkhorn_eps, hc_post_mult_value, sinkhorn_repeat)):
+                return torch.ops.vllm.hcu_adapter_mhc_boundary(
+                    residual, sublayer_out, post_layer_mix, comb_res_mix,
+                    fn, hc_scale, hc_base, pre_mix, norm_weight, norm_eps)
             residual = self._maybe_post(residual,sublayer_out,post_layer_mix,comb_res_mix)
             return residual, *torch.ops.vllm.hcu_adapter_mhc_delayed(residual,fn,hc_scale,hc_base,
                 rms_eps,hc_pre_eps,hc_sinkhorn_eps,hc_post_mult_value,sinkhorn_repeat,
@@ -284,7 +315,8 @@ def _declare_aiter(mhc, kernels, ir, backend, provider, split_k):
             return torch.ops.vllm.hcu_adapter_mhc_post(x,residual,post_layer_mix,comb_res_mix)
 
     return ((pre, pre_fake, HcuMHCPreOp), (fused, fused_fake, HcuMHCFusedPostPreOp),
-            (delayed, delayed_fake, HcuMHCPreDelayedOp), (post, post_fake, HcuMHCPostOp))
+            (delayed, delayed_fake, HcuMHCPreDelayedOp), (post, post_fake, HcuMHCPostOp),
+            (boundary, boundary_fake, None))
 
 
 def _load_aiter_provider():
@@ -381,14 +413,15 @@ def install() -> bool:
             backend = import_module('hcu_adapter.kernels.mhc_aiter')
             declarations = _declare_aiter(mhc, kernels, ir, backend, provider, split_k)
             names = ('hcu_adapter_mhc_pre','hcu_adapter_mhc_fused',
-                     'hcu_adapter_mhc_delayed','hcu_adapter_mhc_post')
+                     'hcu_adapter_mhc_delayed','hcu_adapter_mhc_post','hcu_adapter_mhc_boundary')
         else:
             declarations = _declare(mhc, kernels, ir)
             names = ('hcu_adapter_mhc_pre','hcu_adapter_mhc_fused')
         files = (Path(__file__), Path(inspect.getfile(kernels)), Path(inspect.getfile(rms_ops)))
         if aiter_mode:
             source_dir = Path(__file__).parent.parent / 'kernels'
-            files += (source_dir / 'mhc_aiter.py', source_dir / 'mhc_post_5120_triton.py')
+            files += (source_dir / 'mhc_aiter.py', source_dir / 'mhc_post_5120_triton.py',
+                      source_dir / 'mhc_boundary_triton.py')
         content = dict(sources=[hashlib.sha256(p.read_bytes()).hexdigest() for p in files],
                        torch=torch.__version__, hip=torch.version.hip,
                        mode=mode, split_k=split_k,
@@ -408,7 +441,7 @@ def install() -> bool:
                 owner.register_oot(replacement)
             envs.environment_variables[COMPILE_FACTOR] = factor_getter
             _publication = _Publication(os.getpid(), owners,
-                tuple(item[2] for item in declarations), envs, factor_getter, factor,
+                tuple(item[2] for item in declarations[:len(owners)]), envs, factor_getter, factor,
                 mode, split_k, provider)
             _check_publication(_publication)
             detail = (f'candidate {detected.architecture}/v0.33 AITER HIP mHC '
