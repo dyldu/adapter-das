@@ -7,13 +7,15 @@ import random
 import statistics
 import traceback
 from pathlib import Path
+from unittest import mock
 
 import torch
 
 
 def run(args, report):
     from hcu_adapter.v41_fp8_indexer import build
-    from hcu_adapter.kernels.indexer_topk_post_triton import finish_topk
+    from hcu_adapter.kernels import indexer_topk_post_triton as post_module
+    finish_topk = post_module.finish_topk
     spec = importlib.util.spec_from_file_location('topk_before_fusion', args.original)
     baseline = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(baseline)
@@ -53,18 +55,29 @@ def run(args, report):
                 before = backing.view(torch.int32).clone()
                 top = logits.topk(512, dim=-1)
                 assert torch.equal(post_reference(top.values,top.indices),finish_topk(top.values,top.indices,starts,ends,512,width)), (rows,width,pattern,'post')
-                assert torch.equal(old(logits,starts,ends,512),new(logits,starts,ends,512)), (rows,width,pattern,'wrapper')
+                # Native multiblock top-k may pick different tied NaNs across
+                # identical calls. Compare the transformation of the SAME
+                # native selection, retaining its exact order and membership.
+                with mock.patch.object(torch.Tensor,'topk',return_value=top):
+                    assert torch.equal(old(logits,starts,ends,512),new(logits,starts,ends,512)), (rows,width,pattern,'wrapper same selection')
                 assert torch.equal(backing.view(torch.int32),before), 'source changed'
                 report['eager'].append(dict(rows=rows,width=width,pattern=pattern,exact=True))
             setup('random'); new(logits,starts,ends,512)
             g=torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g): result=new(logits,starts,ends,512)
+            selected={}
+            def retain_selection(values,indices,*a):
+                selected.update(values=values,indices=indices)
+                return finish_topk(values,indices,*a)
+            # Retain references to actual torch top-k outputs inside the full
+            # graph. No extra GPU operation, selection or data copy is added.
+            with mock.patch.object(post_module,'finish_topk',side_effect=retain_selection):
+                with torch.cuda.graph(g): result=new(logits,starts,ends,512)
             for pattern in ('holes','random','nonfinite','ties','allmasked'):
                 setup(pattern); starts.add_(1); ends.sub_(1)
                 g.replay()
-                assert torch.equal(result,old(logits,starts,ends,512)), (rows,width,pattern,'changing graph')
+                assert torch.equal(result,post_reference(selected['values'],selected['indices'])), (rows,width,pattern,'changing graph same selection')
                 report['graphs'].append(dict(rows=rows,width=width,pattern=pattern,exact=True))
-            del g,result
+            del g,result,selected
             if rows in (8,48) and width in (1024,4096,32768):
                 setup('random')
                 gs={}
