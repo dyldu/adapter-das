@@ -51,3 +51,64 @@ def test_missing_provider_preserves_torch_contract(monkeypatch):
     reference=Mock(return_value=expected)
     runtime=MhcAiterRuntime(MhcAiterProvider(),NS(mhc_post_torch=reference),None,None,None)
     assert runtime.post(*args) is expected
+
+
+@pytest.fixture
+def fake_gfx938_post(monkeypatch):
+    """Exercise CUDA admission with real autocast state and no GPU allocation."""
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    precision = torch.get_float32_matmul_precision()
+    enabled = torch.is_autocast_enabled('cuda')
+    dtype = torch.get_autocast_dtype('cuda')
+    monkeypatch.setattr(torch.cuda, 'get_device_properties',
+                        lambda device: NS(gcnArchName='gfx938'))
+    try:
+        torch.set_float32_matmul_precision('highest')
+        torch.set_autocast_enabled('cuda', False)
+        with FakeTensorMode():
+            yield (torch.empty((2, 5120), device='cuda', dtype=torch.bfloat16),
+                   torch.empty((2, 4, 5120), device='cuda', dtype=torch.bfloat16),
+                   torch.empty((2, 4, 1), device='cuda', dtype=torch.float32),
+                   torch.empty((2, 4, 4), device='cuda', dtype=torch.float32))
+    finally:
+        torch.set_autocast_enabled('cuda', enabled)
+        torch.set_autocast_dtype('cuda', dtype)
+        torch.set_float32_matmul_precision(precision)
+
+
+def test_validated_input_is_admitted_without_autocast(fake_gfx938_post):
+    assert kernel.supported(*fake_gfx938_post)
+    assert not torch.cuda.is_initialized()
+
+
+@pytest.mark.parametrize('dtype', [torch.bfloat16, torch.float16])
+def test_cuda_autocast_preserves_torch_post(fake_gfx938_post, dtype, monkeypatch):
+    args = fake_gfx938_post
+    torch.set_autocast_dtype('cuda', dtype)
+    torch.set_autocast_enabled('cuda', True)
+    assert torch.get_float32_matmul_precision() == 'highest'
+    assert not kernel.supported(*args)
+    with pytest.raises(ValueError, match='autocast disabled'):
+        kernel.post_5120(*args)
+
+    fused = Mock(side_effect=AssertionError('FP32 fusion must not run under autocast'))
+    native = Mock(side_effect=AssertionError('unvalidated native H5120 Post'))
+    expected = object()
+
+    def original(x, residual, post, comb):
+        assert torch.is_autocast_enabled('cuda')
+        assert torch.get_autocast_dtype('cuda') == dtype
+        assert x is args[0] and residual is args[1] and comb is args[3]
+        assert post.shape == args[2].shape and post.dtype == args[2].dtype
+        return expected
+
+    reference = Mock(side_effect=original)
+    monkeypatch.setattr(kernel, 'post_5120', fused)
+    runtime = MhcAiterRuntime(MhcAiterProvider(post=native),
+                            NS(mhc_post_torch=reference), None, None, None)
+    assert runtime.post(*args) is expected
+    reference.assert_called_once()
+    fused.assert_not_called()
+    native.assert_not_called()
+    assert not torch.cuda.is_initialized()

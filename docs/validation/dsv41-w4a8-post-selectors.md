@@ -9,10 +9,10 @@ format remain unchanged.
 
 The Post path admits contiguous gfx938 BF16 x/residual, FP32 mixing tensors,
 H5120, four residual streams and 1..1024 rows, with highest FP32 matmul
-precision. It preserves the measured native FP32 bmm forward K-order and +0
-accumulator with explicit FMA instructions; the separate post product and final
-sum retain their rounding boundary before BF16 storage. Unsupported layouts or
-precision settings take the existing implementation.
+precision and CUDA autocast disabled. It preserves the measured native FP32 bmm
+forward K-order and +0 accumulator with explicit FMA instructions; the separate
+post product and final sum retain their rounding boundary before BF16 storage.
+Unsupported layouts or precision settings take the existing implementation.
 
 Selector fusion admits contiguous gfx938 INT32 metadata/storage, at most64
 rows and2048 columns. It uses device CSR offsets, preserves duplicates, filters
@@ -136,3 +136,19 @@ full164 and HE32 accuracy runs on nmz16 completed before this stop.
 No subsequent DSpark GPU probe or serving experiment was started. This series
 is pushed to the existing Adapter MR1 with the user's explicit instruction;
 no incomplete nmz16 workflow is represented as having passed its release SLA.
+
+## Review follow-up: CUDA autocast admission
+
+The review on Adapter MR1 identified that highest FP32 matmul precision does
+not disable CUDA autocast. Under autocast the Torch reference can select a
+different bmm precision, while the fused kernel keeps its explicit FP32 FMA.
+Admission now rejects CUDA autocast and lets the existing runtime call the
+Torch reference with the caller's autocast state intact. The Triton compute
+body is unchanged, and the measured serving scripts do not enable autocast.
+
+CPU-only FakeTensor regression tests exercise real CUDA autocast thread state
+for BF16 and FP16, check fallback to the original Torch entry, and retain a
+positive admission case with autocast disabled. Both autocast cases fail
+before the guard and pass after it without CUDA initialization. The Post
+contract suite is included in the CPU workflow with its Triton import
+dependency. No GPU benchmark or HumanEval run was resumed for this fix.
