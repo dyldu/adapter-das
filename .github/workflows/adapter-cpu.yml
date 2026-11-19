@@ -69,7 +69,10 @@ jobs:
             tests/adapter/test_l15_model_smoke.py \
             tests/adapter/test_l15_upgrade_check.py \
             tests/adapter/test_l16_model_readiness.py \
-            tests/adapter/test_mhc_post_5120_contract.py
+            tests/adapter/test_mhc_post_5120_contract.py \
+            tests/adapter/test_mla_decode_io.py \
+            tests/adapter/test_mla_decode_rope_contract.py \
+            tests/adapter/test_mla_native_plan_contract.py
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

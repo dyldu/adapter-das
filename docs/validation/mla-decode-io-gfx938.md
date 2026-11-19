@@ -1,4 +1,8 @@
-> W4A8 reuse candidate: CPU contracts pass; W4A8 operator/consumer and serving gates are pending. Historical figures below belong to the earlier FP8 experiment.
+> Current W4A8 block64 validation passed exact native consumers and changing
+> graphs. The combined Q/RoPE + MLA + draft Post stack passed full159/164,
+> first32=32 and paired serving performance/8-rank trace gates. See
+> `w4a8-mla-reuse.md`. Isolated timings below belong to the earlier FP8
+> experiment and are not W4A8 performance claims.
 
 # Exact native MLA decode input/output scheduling on gfx938
 
