@@ -4,7 +4,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import Mock
 import pytest
 import torch
-from hcu_adapter.kernels import mhc_post_5120 as kernel
+from hcu_adapter.kernels import mhc_post_5120_triton as kernel
 from hcu_adapter.kernels.mhc_aiter import MhcAiterProvider, MhcAiterRuntime
 
 

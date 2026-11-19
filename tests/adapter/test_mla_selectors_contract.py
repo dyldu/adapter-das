@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 import pytest
 import torch
-from hcu_adapter.kernels import mla_selectors, mla_sparse_decode_dtk
+from hcu_adapter.kernels import mla_selectors_triton as mla_selectors
+from hcu_adapter.kernels import mla_sparse_decode_dtk
 
 
 @pytest.mark.parametrize('csr', [False, True])

@@ -48,7 +48,7 @@ def _selectors_supported(dense, lengths, flat, indptr, q):
 
 
 def _selectors(dense, lengths, flat, indptr, rows, num_slots):
-    from .mla_selectors import try_selectors
+    from .mla_selectors_triton import try_selectors
     compact = try_selectors(dense, lengths, flat, indptr, rows, num_slots)
     if compact is not None:
         return compact

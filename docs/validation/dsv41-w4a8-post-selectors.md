@@ -117,6 +117,13 @@ no W4A8 draft LL/OOM fix has been implemented or measured in this series.
 
 ## User-requested pause and publication
 
+The follow-up CI fix renames the two implementation modules to
+`mhc_post_5120_triton.py` and `mla_selectors_triton.py`, as required by the
+repository's operator-tier naming rules. Imports, probe imports and the mHC
+source-fingerprint path follow the new names. Both implementation files retain
+identical source bytes. The GPU results above refer to the pre-rename source;
+no additional GPU run was started for this module-naming fix.
+
 The user stopped nmz16 immediately during its separate composition-vs-release
 performance run, then explicitly requested pushing the verified commits.
 That run has formal medians38.1442/37.9644ms but no profile exports or completed

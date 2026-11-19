@@ -16,7 +16,7 @@ torch.set_float32_matmul_precision("highest")
 from triton.testing import do_bench_cudagraph
 from vllm.model_executor.kernels.mhc.torch import mhc_post_torch
 from hcu_adapter.kernels.mhc_aiter import MhcAiterProvider, MhcAiterRuntime
-from hcu_adapter.kernels.mhc_post_5120 import post_5120, supported
+from hcu_adapter.kernels.mhc_post_5120_triton import post_5120, supported
 
 
 def reject_native(*args):
