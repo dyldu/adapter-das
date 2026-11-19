@@ -24,18 +24,13 @@ existing entry. No launch option or environment variable is added.
 
 ## Operator validation
 
-The initial 1e-6 RMS scalar gate below is diagnostic, not validation of the
-checkpoint's actual 1e-20 RMS scalar. The first full-model launch was stopped
-before evaluation because its guard would retain the previous path. The probes
-now load all epsilon values from the actual checkpoint config. The corrected
-expanded gate, registered-entry gate and full-model gates are pending.
-
-On nmz18 in `duyl-033-w4a8-1119`, the initial expanded probe covered all 80 target and 6
+On nmz18 in `duyl-033-w4a8-1119`, the expanded probe covered all 80 target and 6
 draft attention/FFN weights, M=1/4/8/16/32/40/48/64, all four Post/previous-mix
 nullable combinations, six magnitudes, and changing inputs and weights during
 graph replay. All 16,512 eager and 8,256 graph checks passed. Updated residual
 and collapsed input are byte exact BF16; FP32 mixes meet the existing
-rtol=2e-5, atol=2e-6 contract. The actual model Post multiplier is 2.
+rtol=2e-5, atol=2e-6 contract. The probe reads RMS epsilon 1e-20 and HC epsilon
+1e-6 from the actual checkpoint config; Post multiplier is 2.
 
 The registered owner passed 24 eager and 24 changing-input graph checks,
 including exact comparison with the same public IR RMSNorm as the existing
@@ -43,21 +38,53 @@ runtime. Its five-output fake schema also passed a fullgraph `aot_eager`
 compile. CPU contract/bridge regressions: 82 passed. L0: GREEN, 30 existing
 warnings. Initial RMS probe used a different private custom-op oracle; the
 corrected probe uses the production public IR operation without changing the
-runtime or tolerance.
+runtime or tolerance. The initial 1e-6 RMS scalar matrix is retained as a
+diagnostic. Its first full-model launch was stopped before evaluation because
+that guard would retain the previous path. The corrected matrix above and the
+full-service result below use the checkpoint's actual 1e-20 RMS epsilon.
 
 Complete operator medians, native versus fused, in microseconds:
 
 | M | Native | Fused |
 |---|---:|---:|
-| 8 | 33.9760 | 20.2104 |
-| 48 | 45.9752 | 30.0360 |
-| 64 | 51.2988 | 35.7092 |
+| 8 | 33.1512 | 20.2304 |
+| 48 | 42.7720 | 30.0316 |
+| 64 | 46.7296 | 35.6760 |
 
-These are operator results. Full HumanEval-164 and fixed fake-prefill,
-five-position 0.6 synthetic acceptance performance are pending for this
-increment. They do not change the last accepted model result of 159/164 or its
-73.7678 ms profiled step. If the new full-model gates fail, revert this
-increment.
+## Full service validation
+
+The immutable tested composition is Adapter `b191b7b` and Plugin `b50d7e3`.
+The full workflow exited 0. Real-prefill/rejection HumanEval passed 159/164
+(96.95%), first32 32/32, with zero errors, missing outputs or truncations.
+
+Two unprofiled performance repeats each completed 64 requests with zero
+failures. TPOT medians were 18.3430 / 17.4224 ms, p99 21.3137 / 21.6903 ms.
+Mean of medians is 17.8827 ms versus the preceding accepted 18.1628 ms, a 1.54%
+reduction. The frozen median +2%, p99 +5% and mean +2% regression ceilings
+passed. The separate >=2%-gain-in-each-repeat claim did not pass.
+
+All eight traces pass gzip CRC and actual dispatch checks: each target step
+uses 77 fused boundaries plus three native entry/Engram seams; DSpark uses five
+fused boundaries plus its native entry. Separate Post calls reduce from 83 to
+6 in target and from 6 to 1 in draft. The Engram injection boundary remains
+intact. FULL target execution, 40/3 DeepEP and activation layers, FP4 staging,
+native exact-rank Top512 and WO_A output ownership are retained.
+
+DP0 target-through-draft-end median is 71.7187 ms (target 65.3704, draft 6.3174),
+versus the preceding 73.7678 ms: 2.0491 ms / 2.78% lower. This profiled step
+measurement is separate from unprofiled TPOT. The supplied SGLang reference is
+65.0983 ms, so a 6.6205 ms gap remains. Hardware memory, context, per-rank batch
+and quantized providers differ; this is a stage reference, not a controlled
+head-to-head result. Joint mHC/norm kernel duration sums also do not establish
+isolated critical-path parity.
+
+Serving arguments and recorded environment match the preceding accepted run.
+Performance retains fake zero KV, five literal unconditional 0.6 acceptance
+rates, DSpark5, 4096 input / 128 output, 64 requests/concurrency and eight
+warmups. Accuracy uses real prefill without synthetic acceptance. Evidence is
+in workspace `nmz18/mhc_boundary_native_rms_service_20261120/acceptance.json`
+and `MHC_BOUNDARY_RESULTS.json`. Documentation follow-ups do not alter the
+tested runtime or tests.
 
 Reproduce the operator gates with `tests/tools/probe_mhc_boundary_expanded.py
 --model <checkpoint> --output <new-result.json> --post-mult 2` and
