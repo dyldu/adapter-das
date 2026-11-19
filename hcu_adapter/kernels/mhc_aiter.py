@@ -289,8 +289,7 @@ class MhcAiterRuntime:
                 and _gpu_tensors(tensors))
 
     def _staged_pre(self, residual, fn, scale, base, rms_eps, pre_eps,
-                    sinkhorn_eps, post_mult, repeat, splits, x=None,
-                    delayed_only=False):
+                    sinkhorn_eps, post_mult, repeat, splits, x=None):
         tokens, hc, hidden = residual.shape
         projected = residual
         if x is not None:
@@ -302,22 +301,9 @@ class MhcAiterRuntime:
         padded = residual.new_empty((splits, tokens, 32), dtype=torch.float32)
         gemm = padded[:, :, :hc * (2 + hc)]
         sqrsum = residual.new_empty((splits, tokens), dtype=torch.float32)
-        from . import mhc_delayed_stage2
-        only_mixes = delayed_only and mhc_delayed_stage2.supported(
-            self.provider, residual, padded, sqrsum, scale, base, splits, x)
-        # delayed() discards the current-Pre collapse and builds its layer
-        # from the previous Pre mix. Do not allocate or compute that output.
-        if only_mixes:
-            post = residual.new_empty((tokens, hc, 1), dtype=torch.float32)
-            comb = residual.new_empty((tokens, hc, hc), dtype=torch.float32)
-            layer = None
-        else:
-            post, comb, layer, _ = self._empty_pre(residual)
+        post, comb, layer, _ = self._empty_pre(residual)
         self.provider.project(gemm, sqrsum, projected, fn, 64, False)
-        if only_mixes:
-            mhc_delayed_stage2.run(padded, sqrsum, scale, base, post, comb,
-                rms_eps, pre_eps, sinkhorn_eps, post_mult, repeat)
-        elif self.provider.tilelang_enabled:
+        if self.provider.tilelang_enabled:
             if self.provider.tilelang_pre is None:
                 raise RuntimeError('TileLang mHC stage2 was selected but is unavailable')
             self.provider.tilelang_pre(
@@ -403,8 +389,7 @@ class MhcAiterRuntime:
         if staged:
             hc, hidden = residual.shape[1:]
             splits = select_splits(residual.shape[0], hc, hidden, self.split_k)
-            post, comb, _, gemm, sqrsum = self._staged_pre(
-                *args, splits, x=x, delayed_only=True)
+            post, comb, _, gemm, sqrsum = self._staged_pre(*args, splits, x=x)
             next_pre = self.pre_mix(gemm, sqrsum, hc_scale, hc_base,
                                     hc, hc * hidden, rms_eps, hc_pre_eps)
             layer = residual[:, 0].clone() if pre_mix is None else self.collapse(residual, pre_mix)
