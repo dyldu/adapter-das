@@ -61,3 +61,14 @@ Evidence under `run/dsv4.1/033/w4a8_reverify_20261119/`:
 - `nmz18/mla_publication_l0.log`
 - `nmz18/uniform06.acceptance.json`
 - `nmz18/uniform06_20261119/`
+
+The later automatic Post+DeepEP composition, measured as Plugin a5bc072 /
+Adapter45a32f3 with no additional config, independently passes full real-prefill
+HumanEval159/164, first32=32 and zero errors/missing/truncations. Same-source
+AG/RS versus default DeepEP TPOT repeats20.118194/19.713255ms versus
+20.122414/19.570560ms pass frozen regression limits, with all16 separate
+traces confirming actual dispatch. The0.3477% mean transport difference
+is not an incremental speedup claim. Whole-device steady memory increases
+190MiB per rank while automatic KV capacity decreases0.57–0.58GiB; these
+are separate metrics. See paired Plugin default-selection documentation and
+`nmz18/defaults_deepep_20261119_v2/acceptance.json` / `memory_comparison.json`.
