@@ -54,7 +54,7 @@ def main():
     opts = parser.parse_args()
     torch.manual_seed(194211)
     rows = []
-    for tokens in (1, 4, 8, 16, 32, 40, 48, 64, 128, 1024):
+    for tokens in (1, 4, 8, 16, 32, 40, 48, 64, 128, 192, 256, 1024):
         for magnitude in (0.0, .001, .25, 1., 8., 100.):
             for layout in (2, 3):
                 args = inputs(tokens, magnitude, layout)
@@ -88,7 +88,7 @@ def main():
         rows.append(dict(edge=kind, different_bf16=0))
 
     graph_cases = []
-    for tokens in (1, 4, 8, 16, 32, 40, 48, 64):
+    for tokens in (1, 4, 8, 16, 32, 40, 48, 64, 192, 256):
         args = inputs(tokens)
         for _ in range(3):
             runtime.post(*args)
@@ -119,7 +119,7 @@ def main():
     assert runtime.post(*empty).shape == empty[1].shape
 
     timing = []
-    for tokens in (1, 8, 40, 48, 64, 128, 1024):
+    for tokens in (1, 8, 40, 48, 64, 128, 192, 256, 1024):
         args = inputs(tokens)
         timing.append(dict(tokens=tokens,
             torch_us=do_bench_cudagraph(lambda: reference(args), rep=50) * 1000,

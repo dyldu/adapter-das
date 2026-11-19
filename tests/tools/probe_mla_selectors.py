@@ -95,6 +95,13 @@ def main():
 
     # Real 584-byte cache, unchanged native FlashMLA. Compare whole decode
     # outputs while changing the selectors, Q, cache and RoPE positions.
+    # Exercise the user's block-size64. Selector math itself also covers
+    # widths/capture rows independently above; unsupported large batches retain
+    # the exact Torch path rather than increasing the fused admission limit.
+    for rows in (192, 256):
+        args = inputs(rows, 128, False)
+        assert not fused.supported(*args)
+        check(decode._selectors(*args), decode._selectors_torch(*args))
     from vllm import _custom_ops  # noqa: F401
     from flash_mla import flash_mla_interface as native
     angle = torch.randn(8192, 32, device='cuda')
@@ -102,12 +109,12 @@ def main():
     kv = torch.randn(256, 512, device='cuda', dtype=torch.bfloat16)
     slot_ids = torch.arange(256, device='cuda')
     positions = slot_ids + 4096
-    cache = torch.zeros(8, 32, 584, device='cuda', dtype=torch.uint8)
+    cache = torch.zeros(4, 64, 584, device='cuda', dtype=torch.uint8)
     def fill_cache():
         torch.ops._C.fused_deepseek_v4_kv_rope_insert(kv, cache, slot_ids, positions, cs, 32, None, False)
     fill_cache()
     selected = decode._selectors
-    for rows in (1, 8, 40, 48):
+    for rows in (1, 8, 40, 48, 64):
         for swa_only in (True, False):
             main_args, extra_args = inputs(rows, 128, True), inputs(rows, 512, True)
             q = torch.randn(rows, 64, 512, device='cuda', dtype=torch.bfloat16)
@@ -142,7 +149,7 @@ def main():
                 assert torch.isfinite(actual).all().item()
                 consumers.append(dict(rows=rows, swa_only=swa_only, replay=replay))
             del graph
-    assert len(eager) == len(graphs) == 480 and len(consumers) == 40
+    assert len(eager) == len(graphs) == 480 and len(consumers) == 50
     result = dict(accepted=True, eager=eager, graphs=graphs, native_consumer=consumers, timings=timings)
     with open(opts.output, 'w') as handle:
         json.dump(result, handle, indent=2)
