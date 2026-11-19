@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 # Copyright (c) 2026 Hygon Information Technology Co., Ltd.
-"""Experimental delayed mHC stage2; not installed in serving.
+"""Delayed mHC stage2 behind the qualified native-source/layout admission.
 
 Adapted from aiter/ops/tilelang/mhc/pre_big_fuse_kernel.py, SHA256
 2ac06a653f02491b6c319d1e46cebcb9fd64081b8499fb2763c02c2ff9bf50a9.
@@ -36,7 +36,7 @@ def _delayed_post_comb_5120(
     mhc_mult3 = mhc_mult * (2 + mhc_mult)
 
     @T.prim_func
-    def mhc_pre_big_fuse(
+    def mhc_delayed_post_comb_5120(
         gemm_out_mul: T.Tensor[(n_splits, num_tokens, 32), T.float32],
         gemm_out_sqrsum: T.Tensor[(n_splits, num_tokens), T.float32],
         mhc_scale: T.Tensor[(3,), T.float32],
@@ -139,7 +139,7 @@ def _delayed_post_comb_5120(
                 # save comb_mix to global memory
                 for j, k in T.Parallel(mhc_mult, mhc_mult):
                     comb_mix[pid, j * mhc_mult + k] = cm[j, k]
-    return mhc_pre_big_fuse
+    return mhc_delayed_post_comb_5120
 
 
 def post_comb_only(padded, sqrsum, scale, base, post, comb, *, rms_eps,
