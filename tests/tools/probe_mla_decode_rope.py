@@ -22,6 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline', required=True, help='Accepted mla_sparse_decode_dtk.py')
     parser.add_argument('--output', required=True)
+    parser.add_argument('--block-size', type=int, choices=(32, 64), default=64)
     args = parser.parse_args()
     spec = importlib.util.spec_from_file_location('hcu_adapter.kernels._decode_rope_oracle', args.baseline)
     baseline = importlib.util.module_from_spec(spec)
@@ -66,9 +67,9 @@ def main():
     kv = torch.randn(256, 512, device='cuda', dtype=torch.bfloat16)
     slots = torch.arange(256, device='cuda')
     positions = slots + 4096
-    cache = torch.zeros(8, 32, 584, device='cuda', dtype=torch.uint8)
+    cache = torch.zeros(256 // args.block_size, args.block_size, 584, device='cuda', dtype=torch.uint8)
     def fill():
-        torch.ops._C.fused_deepseek_v4_kv_rope_insert(kv, cache, slots, positions, cs, 32, None, False)
+        torch.ops._C.fused_deepseek_v4_kv_rope_insert(kv, cache, slots, positions, cs, args.block_size, None, False)
     fill()
     for rows in (1, 4, 8, 16, 32, 40, 48, 64):
         for heads in (4, 8, 64, 128):
@@ -121,7 +122,7 @@ def main():
                             timings.append(dict(rows=rows, heads=heads, swa_only=swa_only, variant=name,
                                 us=do_bench_cudagraph(lambda: consume(function), rep=100) * 1000))
     assert len(masks) == 160 and len(consumers) == 1152
-    result = dict(accepted=True, mask_cases=masks, native_consumer=consumers, timings=timings,
+    result = dict(accepted=True, cache_block_size=args.block_size, mask_cases=masks, native_consumer=consumers, timings=timings,
                   gate='all BF16 output bytes exact in eager/dynamic graphs; all inputs immutable')
     with open(args.output, 'w') as handle:
         json.dump(result, handle, indent=2)
