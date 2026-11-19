@@ -87,7 +87,7 @@ def supported(provider, residual, padded, sqrsum, scale, base, splits, x=None):
 
 def run(padded, sqrsum, scale, base, post, comb, rms_eps, pre_eps,
         sinkhorn_eps, post_mult, repeat):
-    from .mhc_delayed_stage2_tilelang import post_comb_only
+    from .mhc_delayed_stage2_fork import post_comb_only
     post_comb_only(padded, sqrsum, scale, base, post.squeeze(-1),
                    comb.flatten(1), rms_eps=rms_eps, pre_eps=pre_eps,
                    sinkhorn_eps=sinkhorn_eps, post_mult=post_mult, repeat=repeat)

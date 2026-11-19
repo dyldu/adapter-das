@@ -24,7 +24,7 @@ def main():
     assert props.multi_processor_count == 64
     from aiter.ops.mhc import mhc_pre_gemm_sqrsum
     from aiter.ops.tilelang.mhc.pre_big_fuse_kernel import pre_big_fuse_tilelang
-    from hcu_adapter.kernels.mhc_delayed_stage2_tilelang import post_comb_only
+    from hcu_adapter.kernels.mhc_delayed_stage2_fork import post_comb_only
     from hcu_adapter.kernels.mhc_post_5120_triton import post_5120
     from safetensors import safe_open
     from triton.testing import do_bench_cudagraph

@@ -198,6 +198,8 @@ sglang 符号面，shim 妥协不进契约。
      单档位 RoPE 与 KV 计算分别位于 `rope_{emu,lightop}`、`kv_cache_emu`。
    - `runtime_config.py`：宿主侧配置、对齐规则及运行参数状态，无张量数值实现。
    - `lightop_usage.py`：共享调用计数机制，无张量数值实现。
+   - `mhc_delayed_stage2.py`：已验证的 delayed mHC provider/源码/形状门禁和调用门面，
+     无张量数值实现；承接的 AITER TileLang 内核位于 `mhc_delayed_stage2_fork.py`。
    L0 对 `hcu_adapter/kernels/` 按此清单或档位后缀检查；新增豁免需同步说明职责。
 7. **实现文件档位与配置值分开管理**：`_emu` 是 Torch/仿真实现的文件后缀；
    已发布的后端选择值 `torch` 仍是合法配置值，不是文件命名档位。
