@@ -12,8 +12,22 @@ import torch
 _NATIVE_SHA256 = '2ac06a653f02491b6c319d1e46cebcb9fd64081b8499fb2763c02c2ff9bf50a9'
 
 
+class _Identity:
+    """Keep an unhashable TileLang JIT object alive in an identity cache key."""
+    __slots__ = ('value',)
+
+    def __init__(self, value):
+        self.value = value
+
+    def __hash__(self):
+        return id(self.value)
+
+    def __eq__(self, other):
+        return isinstance(other, _Identity) and self.value is other.value
+
+
 @lru_cache(maxsize=4)
-def _native_matches(function, code, factory):
+def _native_matches(function, code, factory_key):
     """Only replace the native arithmetic qualified by the numerical probe.
 
     The wrapper and JIT factory identities are part of the key: replacing
@@ -26,7 +40,7 @@ def _native_matches(function, code, factory):
         return False
     module = import_module(name)
     if (function is not getattr(module, 'pre_big_fuse_tilelang', None)
-            or factory is not getattr(module, '_mhc_pre_big_fuse', None)):
+            or factory_key.value is not getattr(module, '_mhc_pre_big_fuse', None)):
         return False
     path = inspect.getsourcefile(function)
     if path is None:
@@ -68,7 +82,7 @@ def supported(provider, residual, padded, sqrsum, scale, base, splits, x=None):
     if not inspect.isfunction(function):
         return False
     return _native_matches(function, function.__code__,
-                           function.__globals__.get('_mhc_pre_big_fuse'))
+                           _Identity(function.__globals__.get('_mhc_pre_big_fuse')))
 
 
 def run(padded, sqrsum, scale, base, post, comb, rms_eps, pre_eps,

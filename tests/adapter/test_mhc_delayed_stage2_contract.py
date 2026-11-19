@@ -68,22 +68,25 @@ def test_unsupported_contract_keeps_native(eligible, monkeypatch, case):
     assert not torch.cuda.is_initialized()
 
 
-def test_native_source_and_live_function_changes_are_rejected(tmp_path, monkeypatch):
+@pytest.mark.parametrize('unhashable', [False, True])
+def test_native_source_and_live_function_changes_are_rejected(tmp_path, monkeypatch, unhashable):
     source = b'def pre_big_fuse_tilelang():\n    return 1\n'
     path = tmp_path / 'provider.py'; path.write_bytes(source)
     namespace = {'__name__': 'aiter.ops.tilelang.mhc.pre_big_fuse_kernel'}
     exec(compile(source, str(path), 'exec'), namespace)
-    fn = namespace['pre_big_fuse_tilelang']; factory = object()
+    fn = namespace['pre_big_fuse_tilelang']; factory = [] if unhashable else object()
+    key = selected._Identity(factory)
     module = NS(pre_big_fuse_tilelang=fn, _mhc_pre_big_fuse=factory)
     monkeypatch.setattr(selected, 'import_module', lambda name: module)
     monkeypatch.setattr(selected, '_NATIVE_SHA256', hashlib.sha256(source).hexdigest())
     selected._native_matches.cache_clear()
     try:
-        assert selected._native_matches(fn, fn.__code__, factory)
-        assert not selected._native_matches(fn, fn.__code__, object())
+        assert selected._native_matches(fn, fn.__code__, key)
+        assert selected._native_matches(fn, fn.__code__, selected._Identity(factory))
+        assert not selected._native_matches(fn, fn.__code__, selected._Identity(object()))
         code = compile('def pre_big_fuse_tilelang():\n    return 2\n', str(path), 'exec').co_consts[0]
         fn.__code__ = code
-        assert not selected._native_matches(fn, code, factory)
+        assert not selected._native_matches(fn, code, key)
     finally:
         selected._native_matches.cache_clear()
 
