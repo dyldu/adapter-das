@@ -109,9 +109,14 @@ def main():
     kv = torch.randn(256, 512, device='cuda', dtype=torch.bfloat16)
     slot_ids = torch.arange(256, device='cuda')
     positions = slot_ids + 4096
-    cache = torch.zeros(4, 64, 584, device='cuda', dtype=torch.uint8)
+    # Match the serving allocator's padded page stride, including the native
+    # insert ABI's block size. A block64 view cannot be inserted as block32.
+    cache_backing = torch.full((4, 64 * 584 + 64), 0x71,
+                               device='cuda', dtype=torch.uint8)
+    cache = cache_backing.as_strided((4, 64, 584),
+                                     (cache_backing.stride(0), 584, 1))
     def fill_cache():
-        torch.ops._C.fused_deepseek_v4_kv_rope_insert(kv, cache, slot_ids, positions, cs, 32, None, False)
+        torch.ops._C.fused_deepseek_v4_kv_rope_insert(kv, cache, slot_ids, positions, cs, 64, None, False)
     fill_cache()
     selected = decode._selectors
     for rows in (1, 8, 40, 48, 64):
