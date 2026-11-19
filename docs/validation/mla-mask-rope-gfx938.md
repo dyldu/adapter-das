@@ -1,3 +1,5 @@
+> W4A8 reuse candidate: CPU contracts pass; W4A8 operator/consumer and serving gates are pending. Historical figures below belong to the earlier FP8 experiment.
+
 # Exact native mask/writeback + inverse RoPE on gfx938
 
 The native inverse GPT-J RoPE expression is fused with BF16 empty-row masking

@@ -5,7 +5,7 @@ import types
 
 import torch
 
-from hcu_adapter.kernels import mla_decode_rope as rope
+from hcu_adapter.kernels import mla_decode_rope_triton as rope
 
 
 def test_cpu_and_missing_positions_leave_output_untouched():

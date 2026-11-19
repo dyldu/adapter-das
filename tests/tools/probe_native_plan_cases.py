@@ -2,7 +2,7 @@
 import torch
 
 from flash_mla import flash_mla_interface as native
-from hcu_adapter.kernels.mla_native_plan import prepare_native_plan
+from hcu_adapter.kernels.mla_native_plan_triton import prepare_native_plan
 from probe_mla_selectors import capture
 
 

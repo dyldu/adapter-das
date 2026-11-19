@@ -2,7 +2,7 @@
 import pytest
 import torch
 
-from hcu_adapter.kernels.mla_decode_io import native_query_and_sink, try_mask_copy
+from hcu_adapter.kernels.mla_decode_io_triton import native_query_and_sink, try_mask_copy
 
 
 @pytest.mark.parametrize('heads', [4, 8, 16, 64, 96, 128])

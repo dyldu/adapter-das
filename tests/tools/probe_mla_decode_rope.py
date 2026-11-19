@@ -7,7 +7,7 @@ import json
 import torch
 
 torch.cuda.set_device(0)
-from hcu_adapter.kernels import mla_decode_rope as io
+from hcu_adapter.kernels import mla_decode_rope_triton as io
 from vllm.v1.attention.ops.rocm_aiter_mla_sparse import rocm_inverse_rope_rows_ as inverse
 from hcu_adapter.kernels import mla_sparse_decode_dtk as decode
 from probe_mla_selectors import inputs, mutate, capture

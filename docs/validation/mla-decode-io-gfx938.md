@@ -1,3 +1,5 @@
+> W4A8 reuse candidate: CPU contracts pass; W4A8 operator/consumer and serving gates are pending. Historical figures below belong to the earlier FP8 experiment.
+
 # Exact native MLA decode input/output scheduling on gfx938
 
 Full H64/H128 contiguous, 256-byte-aligned native queries/sinks can be passed

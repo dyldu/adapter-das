@@ -5,7 +5,7 @@ import types
 
 import torch
 
-from hcu_adapter.kernels import mla_native_plan as plan
+from hcu_adapter.kernels import mla_native_plan_triton as plan
 
 
 def test_cpu_fallback_is_fresh_and_preserves_counts():

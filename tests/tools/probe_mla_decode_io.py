@@ -7,7 +7,7 @@ import json
 import torch
 
 torch.cuda.set_device(0)
-from hcu_adapter.kernels import mla_decode_io as io
+from hcu_adapter.kernels import mla_decode_io_triton as io
 from hcu_adapter.kernels import mla_sparse_decode_dtk as decode
 from probe_mla_selectors import inputs, mutate, capture
 from triton.testing import do_bench_cudagraph
