@@ -15,6 +15,10 @@ def main():
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
     root, out = Path(args.model), Path(args.output)
+    config = json.loads((root / 'config.json').read_text())
+    config = config.get('text_config', config)
+    rms_eps, hc_eps = config['rms_norm_eps'], config['hc_eps']
+    assert config['hc_mult'] == 4 and config['hc_sinkhorn_iters'] == 20
     assert not out.exists()
     from hcu_adapter.bridges import vllm_mhc as bridge
     from hcu_adapter.kernels import mhc_boundary_triton as kernel
@@ -23,6 +27,7 @@ def main():
     from vllm.ir import ops as ir_ops
 
     report = dict(passed=False, serving_admitted=False, eager=[], graphs=[], fake_checked=False,
+                  rms_eps=rms_eps, hc_eps=hc_eps,
                   rms_reference='The public vllm.ir.ops.rms_norm used by the accepted delayed runtime')
 
     def save():
@@ -55,17 +60,18 @@ def main():
         post_in = torch.rand((m, 4, 1), device='cuda', dtype=torch.float32)
         comb_in = torch.rand((m, 4, 4), device='cuda', dtype=torch.float32)
         assert kernel.supported(residual, fn, scale, base, previous, x, post_in, comb_in,
-                                1.e-6, 1.e-6, 1.e-6, 2., 20)
+                                rms_eps, hc_eps, hc_eps, 2., 20)
 
         def run():
-            return owner.forward_hip(residual, fn, scale, base, 1.e-6, 1.e-6, 1.e-6, 2., 20,
-                pre_mix=previous, norm_weight=norm, norm_eps=1.e-6,
+            return owner.forward_hip(residual, fn, scale, base, rms_eps, hc_eps, hc_eps, 2., 20,
+                pre_mix=previous, norm_weight=norm, norm_eps=rms_eps,
                 sublayer_out=x, post_layer_mix=post_in, comb_res_mix=comb_in)
 
         def check(actual):
             updated, post, comb, layer, pre = kernel.boundary(
-                residual, fn, scale, base, previous, x, post_in, comb_in)
-            normed = ir_ops.rms_norm(layer, norm, 1.e-6)
+                residual, fn, scale, base, previous, x, post_in, comb_in,
+                rms_eps=rms_eps, eps=hc_eps)
+            normed = ir_ops.rms_norm(layer, norm, rms_eps)
             expected = (updated, post, comb, normed, pre)
             assert len(actual) == len(expected) == 5
             checks = [dict(output=i, exact=bool(torch.equal(a, b)),
@@ -102,7 +108,7 @@ def main():
     # AOT tracing sees the real registered schema/fake, with static scalar arguments.
     with set_current_vllm_config(config):
         compiled = torch.compile(lambda a, b, c, d, e, f, g, h, i:
-            torch.ops.vllm.hcu_adapter_mhc_boundary(a, b, c, d, e, f, g, h, i, 1.e-6),
+            torch.ops.vllm.hcu_adapter_mhc_boundary(a, b, c, d, e, f, g, h, i, rms_eps, rms_eps),
             backend='aot_eager', fullgraph=True)
         traced = compiled(residual, x, post_in, comb_in, fn, scale, base, previous, norm)
         check(traced)

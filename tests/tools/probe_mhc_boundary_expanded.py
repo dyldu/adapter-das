@@ -17,6 +17,10 @@ def main():
     parser.add_argument('--post-mult', type=float, default=2.)
     args = parser.parse_args()
     root, out = Path(args.model), Path(args.output)
+    config = json.loads((root / 'config.json').read_text())
+    config = config.get('text_config', config)
+    rms_eps, hc_eps = config['rms_norm_eps'], config['hc_eps']
+    assert config['hc_mult'] == 4 and config['hc_sinkhorn_iters'] == 20
     detail = out.with_suffix('.jsonl')
     assert not out.exists() and not detail.exists()
     from aiter.ops.mhc import mhc_post, mhc_pre_gemm_sqrsum
@@ -35,6 +39,7 @@ def main():
     report = dict(completed=False, passed=False, production_admitted=False, eager_checks=0,
                   graph_checks=0, completed_weights=[], timing=[],
                   post_mult=args.post_mult,
+                  rms_eps=rms_eps, hc_eps=hc_eps,
                   launch=dict(block_k=64, warps=4), details=str(detail),
                   contract='BF16 updated residual and collapsed layer byte-exact; FP32 post/comb/pre rtol2e-5,atol2e-6',
                   scope='All80target+6draft boundaryweights; original8capturebatches;4nullablepost/previousmodes;6eagermagnitudes+3changinggraphreplays')
@@ -89,13 +94,13 @@ def main():
                     def reference():
                         updated = native.post(x, residual, post_in, comb_in) if has_post else residual
                         return updated, *native.delayed(updated, fn, scale, base,
-                            1.e-6, 1.e-6, 1.e-6, args.post_mult, 20, pre_mix=prior)
+                            rms_eps, hc_eps, hc_eps, args.post_mult, 20, pre_mix=prior)
 
                     def candidate():
                         return boundary(residual, fn, scale, base, prior,
                             x if has_post else None, post_in if has_post else None,
                             comb_in if has_post else None, block_k=64, warps=4,
-                            post_mult=args.post_mult)
+                            post_mult=args.post_mult, rms_eps=rms_eps, eps=hc_eps)
 
                     for magnitude in (0., .001, .25, 1., 8., 100.):
                         inputs(magnitude)

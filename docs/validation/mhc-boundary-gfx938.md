@@ -15,14 +15,22 @@ projection and collapse. Those rounding boundaries differ from the source.
 
 Admission requires gfx938 with 64 CUs, inference without autocast, highest FP32
 matmul precision, contiguous tensors on one device, BF16 residual/output,
-FP32 projection/mixes, HC=4, H=5120, M=1..64, Post multiplier 2, all three
-epsilons 1e-6, 20 Sinkhorn iterations, and the existing automatic split policy.
+FP32 projection/mixes, HC=4, H=5120, M=1..64, Post multiplier 2,
+RMS epsilon 1e-20 or 1e-6, pre/Sinkhorn epsilon 1e-6, 20 Sinkhorn iterations,
+and the existing automatic split policy. The W4A8 checkpoint uses RMS epsilon
+1e-20. It is forwarded separately from the pre/Sinkhorn epsilon.
 Direct-x calls, other shapes/scalars and explicit split overrides retain their
 existing entry. No launch option or environment variable is added.
 
 ## Operator validation
 
-On nmz18 in `duyl-033-w4a8-1119`, the expanded probe covers all 80 target and 6
+The initial 1e-6 RMS scalar gate below is diagnostic, not validation of the
+checkpoint's actual 1e-20 RMS scalar. The first full-model launch was stopped
+before evaluation because its guard would retain the previous path. The probes
+now load all epsilon values from the actual checkpoint config. The corrected
+expanded gate, registered-entry gate and full-model gates are pending.
+
+On nmz18 in `duyl-033-w4a8-1119`, the initial expanded probe covered all 80 target and 6
 draft attention/FFN weights, M=1/4/8/16/32/40/48/64, all four Post/previous-mix
 nullable combinations, six magnitudes, and changing inputs and weights during
 graph replay. All 16,512 eager and 8,256 graph checks passed. Updated residual

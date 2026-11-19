@@ -20,7 +20,7 @@ def inputs(device='cpu', m=8):
 
 
 def admitted(values, **changes):
-    scalars = dict(rms_eps=1.e-6, pre_eps=1.e-6, sinkhorn_eps=1.e-6, post_mult=2., repeat=20)
+    scalars = dict(rms_eps=1.e-20, pre_eps=1.e-6, sinkhorn_eps=1.e-6, post_mult=2., repeat=20)
     scalars.update(changes)
     return kernel.supported(*values, **scalars)
 
@@ -51,6 +51,7 @@ def fake_cuda(monkeypatch):
 
 def test_actual_service_contract_and_optional_previous(fake_cuda):
     assert admitted(fake_cuda)
+    assert admitted(fake_cuda, rms_eps=1.e-6)
     fake_cuda[4] = None
     assert admitted(fake_cuda)
     assert not torch.cuda.is_initialized()
@@ -120,9 +121,10 @@ def test_admitted_seam_bypasses_post_and_delayed_reference(monkeypatch):
     monkeypatch.setattr(torch.ops.vllm, 'hcu_adapter_mhc_delayed', fallback, raising=False)
     owner = functions[2][2]()
     owner._maybe_post = Mock(side_effect=AssertionError('separate Post must not run'))
-    result = owner.forward_hip(residual, fn, scale, base, 1.e-6, 1.e-6, 1.e-6, 2., 20,
+    result = owner.forward_hip(residual, fn, scale, base, 1.e-20, 1.e-6, 1.e-6, 2., 20,
         pre_mix=previous, sublayer_out=x, post_layer_mix=post, comb_res_mix=comb)
     assert result is expected
+    assert fused.call_args.args[-1] == 1.e-20
     assert all(a is b for a, b in zip(fused.call_args.args[:8],
                (residual, x, post, comb, fn, scale, base, previous)))
     fallback.assert_not_called()
@@ -153,7 +155,7 @@ def test_unadmitted_seam_keeps_existing_post_and_delayed(monkeypatch, reason):
 def test_boundary_fake_has_five_distinct_outputs(monkeypatch):
     residual, fn, scale, base, previous, x, post, comb = inputs()
     fake = declarations(monkeypatch)[4][1]
-    out = fake(residual, x, post, comb, fn, scale, base, previous, None, 1.e-6)
+    out = fake(residual, x, post, comb, fn, scale, base, previous, None, 1.e-6, 1.e-20)
     assert [tuple(value.shape) for value in out] == [(8,4,5120),(8,4,1),(8,4,4),(8,5120),(8,4)]
     assert [value.dtype for value in out] == [torch.bfloat16,torch.float32,torch.float32,
                                             torch.bfloat16,torch.float32]

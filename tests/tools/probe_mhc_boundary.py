@@ -16,6 +16,9 @@ def main():
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
     root, out = Path(args.model), Path(args.output)
+    config = json.loads((root / 'config.json').read_text())
+    config = config.get('text_config', config)
+    rms_eps, hc_eps = config['rms_norm_eps'], config['hc_eps']
     assert not out.exists()
     from aiter.ops.mhc import mhc_post, mhc_pre_gemm_sqrsum
     from aiter.ops.tilelang.mhc.pre_big_fuse_kernel import pre_big_fuse_tilelang
@@ -64,12 +67,13 @@ def main():
         def reference():
             updated = native.post(x, residual, post_in, comb_in)
             return updated, *native.delayed(updated, fn, scale, base,
-                1.e-6, 1.e-6, 1.e-6, 1., 20, pre_mix=previous)
+                rms_eps, hc_eps, hc_eps, 2., 20, pre_mix=previous)
 
         for block_k in (64, 128, 256):
             for warps in (2, 4):
                 candidate = lambda: boundary(residual, fn, scale, base, previous,
-                    x, post_in, comb_in, block_k=block_k, warps=warps)
+                    x, post_in, comb_in, block_k=block_k, warps=warps,
+                    rms_eps=rms_eps, eps=hc_eps, post_mult=2.)
                 row = dict(m=m, block_k=block_k, warps=warps, eager=[], graphs=[])
                 report['rows'].append(row)
                 save()
