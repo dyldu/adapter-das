@@ -112,3 +112,14 @@ def test_cuda_autocast_preserves_torch_post(fake_gfx938_post, dtype, monkeypatch
     fused.assert_not_called()
     native.assert_not_called()
     assert not torch.cuda.is_initialized()
+
+
+@pytest.mark.parametrize('rows', [17, 65, 1025, 2048])
+def test_rows_are_derived_from_input(fake_gfx938_post, rows):
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    with FakeTensorMode():
+        args = (torch.empty((rows, 5120), device='cuda', dtype=torch.bfloat16),
+                torch.empty((rows, 4, 5120), device='cuda', dtype=torch.bfloat16),
+                torch.empty((rows, 4, 1), device='cuda'),
+                torch.empty((rows, 4, 4), device='cuda'))
+        assert kernel.supported(*args)

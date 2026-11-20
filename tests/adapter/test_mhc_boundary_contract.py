@@ -57,13 +57,13 @@ def test_actual_service_contract_and_optional_previous(fake_cuda):
     assert not torch.cuda.is_initialized()
 
 
-@pytest.mark.parametrize('change', [dict(rms_eps=1.e-5), dict(pre_eps=1.e-5),
-                                  dict(sinkhorn_eps=1.e-5), dict(post_mult=1.), dict(repeat=10)])
+@pytest.mark.parametrize('change', [dict(rms_eps=-1.), dict(pre_eps=1.e-5),
+                                  dict(sinkhorn_eps=1.e-5), dict(post_mult=float('nan')), dict(repeat=0)])
 def test_other_scalar_contracts_fall_back(fake_cuda, change):
     assert not admitted(fake_cuda, **change)
 
 
-@pytest.mark.parametrize('m', [0, 65, 128])
+@pytest.mark.parametrize('m', [0])
 def test_other_batch_sizes_fall_back(fake_cuda, m):
     assert not admitted(inputs('cuda', m))
 
@@ -124,7 +124,7 @@ def test_admitted_seam_bypasses_post_and_delayed_reference(monkeypatch):
     result = owner.forward_hip(residual, fn, scale, base, 1.e-20, 1.e-6, 1.e-6, 2., 20,
         pre_mix=previous, sublayer_out=x, post_layer_mix=post, comb_res_mix=comb)
     assert result is expected
-    assert fused.call_args.args[-1] == 1.e-20
+    assert fused.call_args.args[-4:] == (1.e-20, 1.e-6, 2., 20)
     assert all(a is b for a, b in zip(fused.call_args.args[:8],
                (residual, x, post, comb, fn, scale, base, previous)))
     fallback.assert_not_called()
@@ -155,9 +155,15 @@ def test_unadmitted_seam_keeps_existing_post_and_delayed(monkeypatch, reason):
 def test_boundary_fake_has_five_distinct_outputs(monkeypatch):
     residual, fn, scale, base, previous, x, post, comb = inputs()
     fake = declarations(monkeypatch)[4][1]
-    out = fake(residual, x, post, comb, fn, scale, base, previous, None, 1.e-6, 1.e-20)
+    out = fake(residual, x, post, comb, fn, scale, base, previous, None, 1.e-6, 1.e-20, 1.e-6, 2., 20)
     assert [tuple(value.shape) for value in out] == [(8,4,5120),(8,4,1),(8,4,4),(8,5120),(8,4)]
     assert [value.dtype for value in out] == [torch.bfloat16,torch.float32,torch.float32,
                                             torch.bfloat16,torch.float32]
     assert len({value.data_ptr() for value in out} | {residual.data_ptr()}) == 6
     assert not torch.cuda.is_initialized()
+
+
+@pytest.mark.parametrize('m', [17, 65, 96, 128, 256])
+def test_dynamic_rows_and_scalar_parameters(fake_cuda, m):
+    assert admitted(inputs('cuda', m), rms_eps=1.e-5, pre_eps=1.e-4,
+                    sinkhorn_eps=1.e-4, post_mult=1.5, repeat=7)

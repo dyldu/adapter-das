@@ -51,10 +51,11 @@ def exact(actual, expected):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--rows", nargs="+", type=int, default=[1, 4, 8, 16, 32, 40, 48, 64, 128, 192, 256, 1024])
     opts = parser.parse_args()
     torch.manual_seed(194211)
     rows = []
-    for tokens in (1, 4, 8, 16, 32, 40, 48, 64, 128, 192, 256, 1024):
+    for tokens in opts.rows:
         for magnitude in (0.0, .001, .25, 1., 8., 100.):
             for layout in (2, 3):
                 args = inputs(tokens, magnitude, layout)
@@ -88,7 +89,7 @@ def main():
         rows.append(dict(edge=kind, different_bf16=0))
 
     graph_cases = []
-    for tokens in (1, 4, 8, 16, 32, 40, 48, 64, 192, 256):
+    for tokens in opts.rows:
         args = inputs(tokens)
         for _ in range(3):
             runtime.post(*args)
@@ -109,7 +110,7 @@ def main():
     for index in (0, 1):
         changed = list(args); changed[index] = changed[index].float()
         assert not supported(*changed)
-    assert not supported(*inputs(1025))
+    assert not supported(*inputs(0))
     changed = list(args); changed[1] = changed[1].transpose(0, 1)
     assert not supported(*changed)
     torch.set_float32_matmul_precision("high")
@@ -119,7 +120,7 @@ def main():
     assert runtime.post(*empty).shape == empty[1].shape
 
     timing = []
-    for tokens in (1, 8, 40, 48, 64, 128, 192, 256, 1024):
+    for tokens in opts.rows:
         args = inputs(tokens)
         timing.append(dict(tokens=tokens,
             torch_us=do_bench_cudagraph(lambda: reference(args), rep=50) * 1000,

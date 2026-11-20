@@ -62,3 +62,17 @@ def test_requires_scope_and_valid_payload_metadata():
         with pytest.raises(ValueError, match='metadata mismatch'):
             scope.publish(y, q, s.double())
         assert scope.lookup(y) is None
+
+
+@pytest.mark.parametrize('rows', [1, 17, 65, 96, 256, 1025])
+@pytest.mark.parametrize('eps', [0., 1.e-20, 1.e-6, 1.e-5])
+def test_fusion_accepts_dynamic_rows_and_valid_epsilon(monkeypatch, rows, eps):
+    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    monkeypatch.setattr(FakeTensor, 'data_ptr', lambda _: 16)
+    with FakeTensorMode(), torch.inference_mode():
+        x = torch.empty((rows, 5120), device='cuda', dtype=torch.bfloat16)
+        weight = torch.empty(5120, device='cuda', dtype=torch.bfloat16)
+        assert scope.supported(x, weight, eps)
+        assert not scope.supported(x, weight, -1.)
+        assert not scope.supported(x, weight, float('nan'))
+        assert not scope.supported(x, weight, float('inf'))

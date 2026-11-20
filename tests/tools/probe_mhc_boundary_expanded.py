@@ -14,13 +14,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--model', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--rows', nargs='+', type=int, default=[1, 4, 8, 16, 32, 40, 48, 64])
+    parser.add_argument('--layers', nargs='+', type=int, default=list(range(40)))
+    parser.add_argument('--rms-eps', type=float)
+    parser.add_argument('--hc-eps', type=float)
+    parser.add_argument('--repeat', type=int)
     parser.add_argument('--post-mult', type=float, default=2.)
     args = parser.parse_args()
     root, out = Path(args.model), Path(args.output)
     config = json.loads((root / 'config.json').read_text())
     config = config.get('text_config', config)
     rms_eps, hc_eps = config['rms_norm_eps'], config['hc_eps']
-    assert config['hc_mult'] == 4 and config['hc_sinkhorn_iters'] == 20
+    assert config['hc_mult'] == 4
+    rms_eps = rms_eps if args.rms_eps is None else args.rms_eps
+    hc_eps = hc_eps if args.hc_eps is None else args.hc_eps
+    repeat = config['hc_sinkhorn_iters'] if args.repeat is None else args.repeat
     detail = out.with_suffix('.jsonl')
     assert not out.exists() and not detail.exists()
     from aiter.ops.mhc import mhc_post, mhc_pre_gemm_sqrsum
@@ -34,15 +42,15 @@ def main():
     native = MhcAiterRuntime(provider, None, lambda x, *_: x,
                             mhc_pre_mix_triton, hc_collapse_triton)
     mapping = json.loads((root / 'model.safetensors.index.json').read_text())['weight_map']
-    prefixes = [f'layers.{i}.hc_{kind}' for i in range(40) for kind in ('attn', 'ffn')]
+    prefixes = [f'layers.{i}.hc_{kind}' for i in args.layers for kind in ('attn', 'ffn')]
     prefixes += [f'mtp.{i}.hc_{kind}' for i in range(3) for kind in ('attn', 'ffn')]
     report = dict(completed=False, passed=False, production_admitted=False, eager_checks=0,
                   graph_checks=0, completed_weights=[], timing=[],
-                  post_mult=args.post_mult,
+                  post_mult=args.post_mult, repeat=repeat,
                   rms_eps=rms_eps, hc_eps=hc_eps,
                   launch=dict(block_k=64, warps=4), details=str(detail),
                   contract='BF16 updated residual and collapsed layer byte-exact; FP32 post/comb/pre rtol2e-5,atol2e-6',
-                  scope='All80target+6draft boundaryweights; original8capturebatches;4nullablepost/previousmodes;6eagermagnitudes+3changinggraphreplays')
+                  scope=dict(weights=len(prefixes), rows=args.rows, nullable_modes=4, eager_magnitudes=6, graph_replays=3))
 
     def save():
         out.write_text(json.dumps(report, indent=2) + '\n')
@@ -73,7 +81,7 @@ def main():
             fn, scale, base = [load(prefix + '_' + suffix) for suffix in ('fn', 'scale', 'base')]
             originals = [value.clone() for value in (fn, scale, base)]
             assert fn.shape == (24, 20480)
-            for m in (1, 4, 8, 16, 32, 40, 48, 64):
+            for m in args.rows:
                 residual = torch.empty((m, 4, 5120), device='cuda', dtype=torch.bfloat16)
                 x = torch.empty((m, 5120), device='cuda', dtype=torch.bfloat16)
                 previous = torch.empty((m, 4), device='cuda', dtype=torch.float32)
@@ -94,13 +102,21 @@ def main():
                     def reference():
                         updated = native.post(x, residual, post_in, comb_in) if has_post else residual
                         return updated, *native.delayed(updated, fn, scale, base,
-                            rms_eps, hc_eps, hc_eps, args.post_mult, 20, pre_mix=prior)
+                            rms_eps, hc_eps, hc_eps, args.post_mult, repeat, pre_mix=prior)
 
                     def candidate():
+                        if has_post:
+                            return native.boundary(residual, fn, scale, base, prior,
+                                x, post_in, comb_in, rms_eps, hc_eps, hc_eps,
+                                args.post_mult, repeat)
+                        # Nullable no-Post callers use the same projection
+                        # arithmetic dispatch, without manufacturing a Post.
+                        from hcu_adapter.kernels.mhc_aiter import select_splits
+                        if select_splits(m, 4, 5120, native.split_k) == 1:
+                            return residual, *native.delayed(residual, fn, scale, base,
+                                rms_eps, hc_eps, hc_eps, args.post_mult, repeat, pre_mix=prior)
                         return boundary(residual, fn, scale, base, prior,
-                            x if has_post else None, post_in if has_post else None,
-                            comb_in if has_post else None, block_k=64, warps=4,
-                            post_mult=args.post_mult, rms_eps=rms_eps, eps=hc_eps)
+                            rms_eps=rms_eps, eps=hc_eps, post_mult=args.post_mult, repeat=repeat)
 
                     for magnitude in (0., .001, .25, 1., 8., 100.):
                         inputs(magnitude)
