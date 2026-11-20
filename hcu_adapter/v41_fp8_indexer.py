@@ -159,6 +159,16 @@ def resolve_graph_capture_allowed():
     return graph_capture_allowed if resolver is None else resolver()
 
 
+def fp4_decode_graph_capture_allowed(config) -> bool:
+    """Ask the FP4 owner about its GPU-only decode reader.
+
+    This does not admit the host-metadata FP8 reference. Without an active
+    plugin publishing the narrower FP4 contract, full capture stays refused.
+    """
+    resolver = _resolvers.get("fp4_graph_allowed")
+    return False if resolver is None else bool(resolver()(config))
+
+
 def build():
     """Resolve the reference implementation against the imported vLLM.
 
@@ -300,10 +310,20 @@ def build():
 
         def local_topk(logits, starts, ends, k):
             rows, width = logits.shape
-            output = torch.full((rows, k), -1, dtype=torch.int32, device=logits.device)
             if not rows or not width:
-                return output
+                return torch.full((rows, k), -1, dtype=torch.int32, device=logits.device)
+            if logits.is_cuda:
+                from hcu_adapter.kernels.indexer_topk_lightop import select_topk
+                native = select_topk(logits, starts, ends, k)
+                if native is not None:
+                    return native
             top = logits.topk(min(k, width), dim=-1)
+            if logits.is_cuda:
+                from hcu_adapter.kernels.indexer_topk_post_triton import finish_topk
+                fused = finish_topk(top.values, top.indices, starts, ends, k, width)
+                if fused is not None:
+                    return fused
+            output = torch.full((rows, k), -1, dtype=torch.int32, device=logits.device)
             selected = (top.indices - starts[:, None]).to(torch.int32)
             selected.masked_fill_(top.values == -float("inf"), -1)
             ordered = top.indices.masked_fill(top.values == -float("inf"), width).sort(
