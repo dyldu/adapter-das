@@ -20,7 +20,9 @@ def _stage_fp4_pages(Cache, Table, Lengths, Pages, OutTable,
                      PAGE_STRIDE: tl.constexpr, OUT_ROW_STRIDE: tl.constexpr,
                      OUT_INNER: tl.constexpr, RECORDS: tl.constexpr,
                      PAGES_PER_ROW: tl.constexpr, BLOCK: tl.constexpr):
-    row, page = tl.program_id(0), tl.program_id(1)
+    # Long-context pools exceed 2 GiB even when each row fits in int32.
+    row = tl.program_id(0).to(tl.int64)
+    page = tl.program_id(1).to(tl.int64)
     offset = tl.arange(0, BLOCK)
     payload = offset < 4096
     record = tl.where(payload, offset // 64, (offset - 4096) // 4)
@@ -48,6 +50,15 @@ def _supported_device(index):
             and props.multi_processor_count == 64)
 
 
+def supports_staging_device(device):
+    """Share the device decision with startup workspace accounting."""
+    device = torch.device(device)
+    if device.type != 'cuda' or torch.version.hip is None:
+        return False
+    index = device.index if device.index is not None else torch.cuda.current_device()
+    return _supported_device(index)
+
+
 def stage_decode_pages(cache, table, lengths, pages, out_table):
     """Fill caller-owned pages/table; return False outside the tested ABI."""
     tensors = (cache, table, lengths, pages, out_table)
@@ -65,7 +76,7 @@ def stage_decode_pages(cache, table, lengths, pages, out_table):
             or out_table.shape != pages.shape[:2]
             or table.shape[1] * cache.shape[1] < pages.shape[1] * 64):
         return False
-    if not _supported_device(cache.device.index):
+    if not supports_staging_device(cache.device):
         return False
     if pages.shape[0] and pages.shape[1]:
         _stage_fp4_pages[(pages.shape[0], pages.shape[1])](
