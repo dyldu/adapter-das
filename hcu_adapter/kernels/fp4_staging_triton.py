@@ -43,6 +43,39 @@ def _stage_fp4_pages(Cache, Table, Lengths, Pages, OutTable,
               row * PAGES_PER_ROW + page)
 
 
+@triton.jit
+def _stage_fp4_live_pages(Cache, Table, Lengths, Pages, OutTable,
+                          CACHE_STRIDE: tl.constexpr, TABLE_STRIDE: tl.constexpr,
+                          TABLE_INNER: tl.constexpr, PAGE_ROW_STRIDE: tl.constexpr,
+                          PAGE_STRIDE: tl.constexpr, OUT_ROW_STRIDE: tl.constexpr,
+                          OUT_INNER: tl.constexpr, RECORDS: tl.constexpr,
+                          PAGES_PER_ROW: tl.constexpr, BLOCK: tl.constexpr):
+    row = tl.program_id(0).to(tl.int64)
+    length = tl.minimum(tl.load(Lengths + row), PAGES_PER_ROW * 64)
+    # The allocation retains its maximum pitch, but replay visits only pages
+    # named by the current device lengths. No host read or captured length.
+    for page in range(tl.program_id(1), tl.cdiv(length, 64), tl.num_programs(1)):
+        page64 = page.to(tl.int64)
+        offset = tl.arange(0, BLOCK)
+        payload = offset < 4096
+        record = tl.where(payload, offset // 64, (offset - 4096) // 4)
+        byte = tl.where(payload, offset % 64, (offset - 4096) % 4)
+        logical = page64 * 64 + record
+        valid = (logical < length) & (offset < 4352)
+        physical_page = tl.load(
+            Table + row * TABLE_STRIDE + logical // RECORDS * TABLE_INNER,
+            mask=valid, other=0).to(tl.int64)
+        physical_record = tl.where(valid, logical % RECORDS, 0)
+        inside = tl.where(payload, physical_record * 64 + byte,
+                          RECORDS * 64 + physical_record * 4 + byte)
+        values = tl.load(Cache + physical_page * CACHE_STRIDE + inside,
+                         mask=offset < 4352, other=0)
+        tl.store(Pages + row * PAGE_ROW_STRIDE + page64 * PAGE_STRIDE + offset,
+                  values, mask=offset < 4352)
+        tl.store(OutTable + row * OUT_ROW_STRIDE + page64 * OUT_INNER,
+                  row * PAGES_PER_ROW + page)
+
+
 @lru_cache(maxsize=None)
 def _supported_device(index):
     props = torch.cuda.get_device_properties(index)
@@ -59,7 +92,7 @@ def supports_staging_device(device):
     return _supported_device(index)
 
 
-def stage_decode_pages(cache, table, lengths, pages, out_table):
+def stage_decode_pages(cache, table, lengths, pages, out_table, *, live_only=False):
     """Fill caller-owned pages/table; return False outside the tested ABI."""
     tensors = (cache, table, lengths, pages, out_table)
     if (not cache.is_cuda or torch.version.hip is None
@@ -79,7 +112,13 @@ def stage_decode_pages(cache, table, lengths, pages, out_table):
     if not supports_staging_device(cache.device):
         return False
     if pages.shape[0] and pages.shape[1]:
-        _stage_fp4_pages[(pages.shape[0], pages.shape[1])](
+        if live_only:
+            sms = torch.cuda.get_device_properties(cache.device).multi_processor_count
+            grid = (pages.shape[0], min(pages.shape[1], triton.cdiv(sms, pages.shape[0])))
+            kernel = _stage_fp4_live_pages
+        else:
+            grid, kernel = (pages.shape[0], pages.shape[1]), _stage_fp4_pages
+        kernel[grid](
             cache, table, lengths, pages, out_table,
             cache.stride(0), table.stride(0), table.stride(1),
             pages.stride(0), pages.stride(1), out_table.stride(0), out_table.stride(1),
