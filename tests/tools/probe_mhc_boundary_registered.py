@@ -13,18 +13,27 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--model', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--rows', type=int, nargs='+', default=[1, 4, 8, 16, 32, 40, 48, 64])
+    parser.add_argument('--rms-eps', type=float)
+    parser.add_argument('--hc-eps', type=float)
+    parser.add_argument('--post-mult', type=float, default=2.)
+    parser.add_argument('--repeat', type=int, default=20)
     args = parser.parse_args()
     root, out = Path(args.model), Path(args.output)
     config = json.loads((root / 'config.json').read_text())
     config = config.get('text_config', config)
     rms_eps, hc_eps = config['rms_norm_eps'], config['hc_eps']
+    rms_eps = rms_eps if args.rms_eps is None else args.rms_eps
+    hc_eps = hc_eps if args.hc_eps is None else args.hc_eps
     assert config['hc_mult'] == 4 and config['hc_sinkhorn_iters'] == 20
     assert not out.exists()
     from hcu_adapter.bridges import vllm_mhc as bridge
     from hcu_adapter.kernels import mhc_boundary_triton as kernel
+    from hcu_adapter.kernels.mhc_aiter import MhcAiterRuntime, load_provider
     from vllm.config import VllmConfig, set_current_vllm_config
     from vllm.model_executor.layers.mhc import MHCPreDelayedOp
     from vllm.ir import ops as ir_ops
+    from vllm.model_executor.kernels.mhc import torch as torch_kernels
 
     report = dict(passed=False, serving_admitted=False, eager=[], graphs=[], fake_checked=False,
                   rms_eps=rms_eps, hc_eps=hc_eps,
@@ -36,6 +45,8 @@ def main():
     save()
     assert bridge.install()
     bridge.require_healthy()
+    reference = MhcAiterRuntime(load_provider(), torch_kernels, ir_ops.rms_norm,
+        torch.ops.vllm.mhc_pre_mix_triton, torch.ops.vllm.hc_collapse_triton)
     config = VllmConfig()
     with set_current_vllm_config(config):
         owner = MHCPreDelayedOp()
@@ -53,24 +64,25 @@ def main():
     norm = load('layers.0.attn_norm.weight')
     torch.set_float32_matmul_precision('highest')
     torch.manual_seed(20261123)
-    for m in (1, 4, 8, 16, 32, 40, 48, 64):
+    for m in args.rows:
         residual = torch.randn((m, 4, 5120), device='cuda', dtype=torch.bfloat16)
         x = torch.randn((m, 5120), device='cuda', dtype=torch.bfloat16)
         previous = torch.rand((m, 4), device='cuda', dtype=torch.float32)
         post_in = torch.rand((m, 4, 1), device='cuda', dtype=torch.float32)
         comb_in = torch.rand((m, 4, 4), device='cuda', dtype=torch.float32)
         assert kernel.supported(residual, fn, scale, base, previous, x, post_in, comb_in,
-                                rms_eps, hc_eps, hc_eps, 2., 20)
+                                rms_eps, hc_eps, hc_eps, args.post_mult, args.repeat)
 
         def run():
-            return owner.forward_hip(residual, fn, scale, base, rms_eps, hc_eps, hc_eps, 2., 20,
+            return owner.forward_hip(residual, fn, scale, base, rms_eps, hc_eps, hc_eps, args.post_mult, args.repeat,
                 pre_mix=previous, norm_weight=norm, norm_eps=rms_eps,
                 sublayer_out=x, post_layer_mix=post_in, comb_res_mix=comb_in)
 
         def check(actual):
-            updated, post, comb, layer, pre = kernel.boundary(
+            updated, post, comb, layer, pre = reference.boundary(
                 residual, fn, scale, base, previous, x, post_in, comb_in,
-                rms_eps=rms_eps, eps=hc_eps)
+                rms_eps=rms_eps, pre_eps=hc_eps, sinkhorn_eps=hc_eps,
+                post_mult=args.post_mult, repeat=args.repeat)
             normed = ir_ops.rms_norm(layer, norm, rms_eps)
             expected = (updated, post, comb, normed, pre)
             assert len(actual) == len(expected) == 5
@@ -108,7 +120,8 @@ def main():
     # AOT tracing sees the real registered schema/fake, with static scalar arguments.
     with set_current_vllm_config(config):
         compiled = torch.compile(lambda a, b, c, d, e, f, g, h, i:
-            torch.ops.vllm.hcu_adapter_mhc_boundary(a, b, c, d, e, f, g, h, i, rms_eps, rms_eps),
+            torch.ops.vllm.hcu_adapter_mhc_boundary(a, b, c, d, e, f, g, h, i,
+                rms_eps, rms_eps, hc_eps, args.post_mult, args.repeat),
             backend='aot_eager', fullgraph=True)
         traced = compiled(residual, x, post_in, comb_in, fn, scale, base, previous, norm)
         check(traced)

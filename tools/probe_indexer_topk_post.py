@@ -24,7 +24,7 @@ def run(args, report):
     report.update(eager=[], graphs=[], timings=[], refusal=[], oracle_sha256=__import__('hashlib').sha256(Path(args.original).read_bytes()).hexdigest())
     def save(): Path(args.output).write_text(json.dumps(report, indent=2)+'\n')
 
-    for rows in (1, 8, 48, 64):
+    for rows in args.rows:
         for width in (512, 1024, 4096, 32768):
             # An offset, padded outer stride checks that torch-owned topk output,
             # rather than input-layout assumptions, defines the fused ABI.
@@ -111,9 +111,12 @@ def run(args, report):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--original',required=True);p.add_argument('--output',required=True);args=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--original',required=True);p.add_argument('--output',required=True);p.add_argument('--rows',type=int,nargs='+',default=[1,8,48,64]);args=p.parse_args()
     report={'passed':False}
-    try:run(args,report)
+    # Isolate postprocessing; native selection has its own rank/MLA probe.
+    try:
+        with mock.patch('hcu_adapter.kernels.indexer_topk_lightop.select_topk',return_value=None):
+            run(args,report)
     except Exception:
         report['error']=traceback.format_exc();raise
     finally:Path(args.output).write_text(json.dumps(report,indent=2)+'\n')

@@ -31,7 +31,7 @@ if triton is not None:
     @triton.jit
     def _mask_copy_inverse_rope(Result, Output, Main, Extra, Positions, CS,
                                 HEADS: tl.constexpr, HAS_EXTRA: tl.constexpr):
-        row = tl.program_id(0)
+        row = tl.program_id(0).to(tl.int64)
         head = tl.program_id(1)
         base = (row * HEADS + head) * 512
         count = tl.load(Main + row)
@@ -58,7 +58,7 @@ def try_mask_copy_rope(result, output, main_lens, extra_lens, positions, cos_sin
     if triton is None or positions is None or cos_sin is None:
         return False
     tensors = (result, output, main_lens, positions, cos_sin) + (() if extra_lens is None else (extra_lens,))
-    if (result.ndim != 3 or not 0 < result.shape[0] <= 64
+    if (result.ndim != 3 or result.shape[0] <= 0
             or result.shape[1:] not in ((64, 512), (128, 512))
             or output is None or output.shape != result.shape
             or result.dtype != torch.bfloat16 or output.dtype != torch.bfloat16

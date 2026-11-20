@@ -22,13 +22,14 @@ def main():
     parser.add_argument('--baseline', required=True, help='Accepted mla_sparse_decode_dtk.py')
     parser.add_argument('--output', required=True)
     parser.add_argument('--block-size', type=int, choices=(32, 64), default=64)
+    parser.add_argument('--rows',type=int,nargs='+',default=[1,4,8,16,32,40,48,64])
     args = parser.parse_args()
     spec = importlib.util.spec_from_file_location('hcu_adapter.kernels._decode_io_oracle', args.baseline)
     baseline = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(baseline)
     torch.manual_seed(194450)
     masks, consumers, timings = [], [], []
-    for rows in (1, 4, 8, 16, 32, 40, 48, 64):
+    for rows in args.rows:
         for heads in (64, 128):
             size = rows * heads * 512
             # Includes every BF16 bit pattern, signed zeros and NaN payloads.
@@ -66,7 +67,7 @@ def main():
     def fill():
         torch.ops._C.fused_deepseek_v4_kv_rope_insert(kv, cache, slots, positions, cs, args.block_size, None, False)
     fill()
-    for rows in (1, 4, 8, 16, 32, 40, 48, 64):
+    for rows in args.rows:
         for heads in (4, 8, 64, 128):
             for swa_only in (True, False):
                 for layout in ('contiguous', 'strided', 'unaligned'):
@@ -109,7 +110,7 @@ def main():
                         for name, function in (('accepted_bridge', baseline.try_decode), ('io_bridge', decode.try_decode)):
                             timings.append(dict(rows=rows, heads=heads, swa_only=swa_only, variant=name,
                                 us=do_bench_cudagraph(lambda: function(**kwargs), rep=100) * 1000))
-    assert len(masks) == 160 and len(consumers) == 1152
+    assert len(masks) == len(args.rows)*20 and len(consumers) == len(args.rows)*144
     result = dict(accepted=True, cache_block_size=args.block_size, mask_cases=masks, native_consumer=consumers, timings=timings,
                   gate='all BF16 output bytes exact in eager/dynamic graphs; all inputs immutable')
     with open(args.output, 'w') as handle:

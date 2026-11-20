@@ -25,7 +25,7 @@ def run(args, report):
         ordered=torch.where(values==0,0x80000000,ordered)
         ordered=torch.where(torch.isnan(values),0xffffffff,ordered)
         return torch.where(values==-float('inf'),-1,ordered)
-    for rows in (1,8,48,64):
+    for rows in args.rows:
         for width in (512,1024,4096,32768):
             backing=torch.empty((rows,width+17),device='cuda',dtype=torch.float32)
             x=backing[:,3:width+3]
@@ -111,7 +111,7 @@ def run(args, report):
     slots=torch.arange(1024,device='cuda');pos=slots.clone()
     angle=torch.randn((2048,32),device='cuda');cs=torch.cat((angle.cos(),angle.sin()),1)
     torch.ops._C.fused_deepseek_v4_kv_rope_insert(kv,cache,slots,pos,cs,64,None,False)
-    for rows in (8,48):
+    for rows in args.rows:
         q=torch.randn((rows,64,512),device='cuda',dtype=torch.bfloat16)
         starts=torch.zeros(rows,device='cuda',dtype=torch.int32);ends=torch.full_like(starts,1024)
         x=torch.rand((rows,1024),device='cuda').argsort(-1).float()
@@ -135,7 +135,7 @@ def run(args, report):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--original',required=True);p.add_argument('--output',required=True);a=p.parse_args();r={'passed':False}
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--original',required=True);p.add_argument('--output',required=True);p.add_argument('--rows',type=int,nargs='+',default=[1,8,48,64]);a=p.parse_args();r={'passed':False}
     try:run(a,r)
     except Exception:r['error']=traceback.format_exc();raise
     finally:Path(a.output).write_text(json.dumps(r,indent=2)+'\n')

@@ -63,10 +63,11 @@ def capture(function):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--rows',type=int,nargs='+',default=[1,4,8,16,32,40,48,64])
     opts = parser.parse_args()
     torch.manual_seed(194244)
     eager, graphs, timings, consumers = [], [], [], []
-    for rows in (1, 4, 8, 16, 32, 40, 48, 64):
+    for rows in opts.rows:
         for width in (0, 1, 63, 64, 127, 128, 511, 512, 513, 2048):
             for csr in (False, True):
                 args = inputs(rows, width, csr)
@@ -95,12 +96,10 @@ def main():
 
     # Real 584-byte cache, unchanged native FlashMLA. Compare whole decode
     # outputs while changing the selectors, Q, cache and RoPE positions.
-    # Exercise the user's block-size64. Selector math itself also covers
-    # widths/capture rows independently above; unsupported large batches retain
-    # the exact Torch path rather than increasing the fused admission limit.
+    # Exercise the user's block-size64, including large row batches.
     for rows in (192, 256):
         args = inputs(rows, 128, False)
-        assert not fused.supported(*args)
+        assert fused.supported(*args)
         check(decode._selectors(*args), decode._selectors_torch(*args))
     from vllm import _custom_ops  # noqa: F401
     from flash_mla import flash_mla_interface as native
@@ -119,7 +118,7 @@ def main():
         torch.ops._C.fused_deepseek_v4_kv_rope_insert(kv, cache, slot_ids, positions, cs, 64, None, False)
     fill_cache()
     selected = decode._selectors
-    for rows in (1, 8, 40, 48, 64):
+    for rows in opts.rows:
         for swa_only in (True, False):
             main_args, extra_args = inputs(rows, 128, True), inputs(rows, 512, True)
             q = torch.randn(rows, 64, 512, device='cuda', dtype=torch.bfloat16)
@@ -154,7 +153,7 @@ def main():
                 assert torch.isfinite(actual).all().item()
                 consumers.append(dict(rows=rows, swa_only=swa_only, replay=replay))
             del graph
-    assert len(eager) == len(graphs) == 480 and len(consumers) == 50
+    assert len(eager) == len(graphs) == len(opts.rows)*60 and len(consumers) == len(opts.rows)*10
     result = dict(accepted=True, eager=eager, graphs=graphs, native_consumer=consumers, timings=timings)
     with open(opts.output, 'w') as handle:
         json.dump(result, handle, indent=2)

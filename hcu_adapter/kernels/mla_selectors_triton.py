@@ -12,7 +12,7 @@ except ImportError:
 
 
 def supported(dense, lengths, flat, indptr, rows, num_slots):
-    if triton is None or not 0 < rows <= 64 or not 0 <= num_slots <= 2147483647:
+    if triton is None or rows <= 0 or not 0 <= num_slots <= 2147483647:
         return False
     if flat is not None or indptr is not None:
         if (flat is None or indptr is None or flat.ndim != 1
@@ -40,7 +40,7 @@ if triton is not None:
                            WIDTH: tl.constexpr, CAPACITY: tl.constexpr,
                            SLOTS: tl.constexpr, PADDED: tl.constexpr,
                            CSR: tl.constexpr, BLOCK: tl.constexpr):
-        row = tl.program_id(0)
+        row = tl.program_id(0).to(tl.int64)
         col = tl.arange(0, BLOCK)
         if CSR:
             begin = tl.load(Metadata + row)
