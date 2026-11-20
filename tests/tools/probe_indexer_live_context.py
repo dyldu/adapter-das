@@ -8,7 +8,7 @@ import statistics
 import torch
 
 from hcu_adapter.kernels.indexer_topk_lightop import select_topk
-from hcu_adapter.kernels.indexer_live_mask import mask_decode_candidates
+from hcu_adapter.kernels.indexer_live_mask_triton import mask_decode_candidates
 
 
 def rank_key(x):

@@ -379,7 +379,7 @@ def build():
                     else:
                         masked = False
                         if bounded and helper is apply_candidate_mask:
-                            from hcu_adapter.kernels.indexer_live_mask import mask_decode_candidates
+                            from hcu_adapter.kernels.indexer_live_mask_triton import mask_decode_candidates
                             masked = mask_decode_candidates(logits, ends, candidates, block_size)
                         if not masked:
                             helper(logits, starts, ends, candidates, block_size)
