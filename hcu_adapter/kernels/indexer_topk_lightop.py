@@ -129,9 +129,14 @@ def select_topk(logits, starts, ends, k, *, valid_lengths=None):
             width, pitch, logits.stride(0), 4096, num_warps=4)
     else:
         sms = torch.cuda.get_device_properties(logits.device).multi_processor_count
-        _topk_live_scores[(rows, min(triton.cdiv(pitch, 4096), triton.cdiv(sms, rows)))](
+        # Smaller tiles and eight waves hide memory latency on short decode
+        # batches. Work still follows each device length, including graph
+        # replay; no maximum context or batch size is baked into the grid.
+        block = 512
+        programs = min(triton.cdiv(pitch, block), triton.cdiv(8 * sms, rows))
+        _topk_live_scores[(rows, programs)](
             logits, lengths, scores, offsets,
-            width, pitch, logits.stride(0), 4096, num_warps=4)
+            width, pitch, logits.stride(0), block, num_warps=4)
     topk_transform_ragged_v2(scores, lengths, out_offsets=offsets, out_indices=indices)
     _topk_native_output[(rows,)](logits, indices, starts, ends, out,
         width, logits.stride(0), k, num_warps=4)
