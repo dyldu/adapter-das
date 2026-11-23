@@ -59,3 +59,15 @@ def test_cold_capture_returns_native_without_query_or_tuning():
     graph=torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):assert try_scaled_mm(a,w,sa,sw) is None
     graph.replay()
+
+
+def test_native_fallback_handle_is_initialized_in_fresh_process():
+    import subprocess
+    import sys
+    from pathlib import Path
+    pytest.importorskip('vllm')
+    script=Path(__file__).resolve().parents[1]/'tools/_probe_fp8_lt_cold_capture.py'
+    result=subprocess.run([sys.executable,str(script)],stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,text=True,timeout=180)
+    assert result.returncode==0,result.stdout
+    assert '3 changed-input replays passed' in result.stdout
