@@ -72,6 +72,7 @@ def install() -> bool:
 
     import torch
     from hcu_adapter.kernels.scaled_mm_lightop import scaled_mm, supported
+    from hcu_adapter.kernels.fp8_scaled_mm_cpp import try_scaled_mm
 
     architecture = detection.architecture
 
@@ -81,6 +82,12 @@ def install() -> bool:
                  Bs: torch.Tensor, out_dtype: torch.dtype,
                  bias: torch.Tensor | None = None) -> torch.Tensor:
         if supported(A, B, As, Bs, out_dtype, bias, architecture):
+            if A.dtype == torch.float8_e4m3fn and out_dtype == torch.bfloat16 and bias is None:
+                sa = As.reshape(-1, 1).expand(A.shape[0], 1).contiguous()
+                sb = Bs.reshape(-1, 1).expand(B.shape[1], 1).contiguous()
+                optimized = try_scaled_mm(A, B.t(), sa, sb)
+                if optimized is not None:
+                    return optimized
             return scaled_mm(A, B, As, Bs, out_dtype, bias, gemm=vendor)
         return original(A, B, As, Bs, out_dtype, bias)
 
