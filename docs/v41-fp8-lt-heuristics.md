@@ -41,6 +41,15 @@ retained; the rerun normalizes both vectors by the same reference magnitude befo
 computing the same L2/cosine thresholds. This fixes metric underflow without
 changing the numeric contract.
 
+The first whole-model startup exposed a native fallback initialization problem:
+when every eager call selects the new path, LightOp first creates its per-device
+hipBLASLt handle inside a cold-shape capture, which is forbidden. The existing
+bridge now eagerly calls the original provider once per device before selecting
+the tuned path. A fresh-process regression deliberately avoids the native
+control before capture and checks three changed-input replays of an unseen
+M257 fallback shape. That test also covers the lazy handle lifecycle missed by
+ordinary eager-versus-native comparisons.
+
 No whole-model speedup is established by these operator results. Full164
 HumanEval>=156/164, zero request errors/truncations/invalid completions, eight-rank
 trace activation and unprofiled serving measurements remain required.
