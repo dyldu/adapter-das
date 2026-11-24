@@ -17,15 +17,23 @@ def _silu_clamp_bf16_quant(X, Q, S, N: tl.constexpr, LIMIT: tl.constexpr,
     col = tl.arange(0, BLOCK)
     gate = tl.load(X + row * (2 * N) + col, col < N, other=0).to(tl.float32)
     up = tl.load(X + row * (2 * N) + N + col, col < N, other=0).to(tl.float32)
-    gate = tl.minimum(gate, LIMIT)
-    up = tl.minimum(tl.maximum(up, -LIMIT), LIMIT)
+    # The native clamp stores gate back to BF16 before evaluating SiLU.
+    gate = tl.minimum(gate, LIMIT).to(tl.bfloat16).to(tl.float32)
+    # fmaxf(fminf(up, limit), -limit): the order also selects +limit for NaN.
+    up = tl.maximum(tl.minimum(up, LIMIT), -LIMIT)
+    if N % 8:
+        # Native BF16 widths not divisible by its 128-bit vector width use
+        # compute<scalar_t>, which also rounds the clamped up operand.
+        up = up.to(tl.bfloat16).to(tl.float32)
     # Stock computes (up + beta), including beta=+0: -0 + +0 becomes +0.
     # Preserve that sign rule explicitly, since a compiler may fold up + 0.
     up = tl.where(up == 0.0, 0.0, up)
     # _C.silu_and_mul_with_clamp rounds the activation, then the product.
     activated = (gate / (1.0 + tl.exp(-gate))).to(tl.bfloat16).to(tl.float32)
     value = (activated * up).to(tl.bfloat16).to(tl.float32)
-    amax = tl.max(tl.where(col < N, tl.abs(value), 0), 0)
+    # Both native providers reduce with fmaxf, ignoring a NaN operand.
+    # In particular an all-NaN row has amax=0, not a NaN LightOp scale.
+    amax = tl.max(tl.where((col < N) & (value == value), tl.abs(value), 0.0), 0)
     scale = tl.div_rn(amax, 448.0)
     if not LIGHTOP:
         scale = tl.maximum(scale, 1.0 / (448.0 * 512.0))
@@ -35,11 +43,11 @@ def _silu_clamp_bf16_quant(X, Q, S, N: tl.constexpr, LIMIT: tl.constexpr,
         divided = value * tl.div_rn(448.0, tl.where(amax == 0, 1.0, amax))
     else:
         divided = tl.div_rn(value, scale)
-    quant = tl.minimum(tl.maximum(divided, -448.0), 448.0)
+    quant = tl.maximum(-448.0, tl.minimum(divided, 448.0))
     if LIGHTOP:
         # LightOp preserves the negative canonical NaN from 0 * inf when a
-        # tiny nonzero row overflows 448/amax. min/max alone replace it with
-        # -448, changing the E4M3 code from 0xff to 0xfe.
+        # tiny nonzero row overflows 448/amax. Native fmin/fmax would instead
+        # replace it with +448; only the LightOp contract restores NaN.
         nan = tl.full((), 0xffc00000, tl.uint32).to(tl.float32, bitcast=True)
         quant = tl.where(divided != divided, nan, quant)
     tl.store(Q + row * N + col, quant, col < N)
@@ -48,8 +56,8 @@ def _silu_clamp_bf16_quant(X, Q, S, N: tl.constexpr, LIMIT: tl.constexpr,
 
 @triton.jit
 def _shared_bf16_value(gate, up, LIMIT: tl.constexpr):
-    gate = tl.minimum(gate.to(tl.float32), LIMIT)
-    up = tl.minimum(tl.maximum(up.to(tl.float32), -LIMIT), LIMIT)
+    gate = tl.minimum(gate.to(tl.float32), LIMIT).to(tl.bfloat16).to(tl.float32)
+    up = tl.maximum(tl.minimum(up.to(tl.float32), LIMIT), -LIMIT)
     up = tl.where(up == 0.0, 0.0, up)
     activated = (gate / (1.0 + tl.exp(-gate))).to(tl.bfloat16).to(tl.float32)
     return (activated * up).to(tl.bfloat16).to(tl.float32)
@@ -66,7 +74,9 @@ def _silu_clamp_bf16_quant_2304(X, Q, S, LIMIT: tl.constexpr, LIGHTOP: tl.conste
                               tl.load(X + row * 4608 + 2304 + col), LIMIT)
     last = _shared_bf16_value(tl.load(X + row * 4608 + tail),
                              tl.load(X + row * 4608 + 2304 + tail), LIMIT)
-    amax = tl.maximum(tl.max(tl.abs(value), 0), tl.max(tl.abs(last), 0))
+    amax = tl.maximum(
+        tl.max(tl.where(value == value, tl.abs(value), 0.0), 0),
+        tl.max(tl.where(last == last, tl.abs(last), 0.0), 0))
     scale = tl.div_rn(amax, 448.0)
     if not LIGHTOP:
         scale = tl.maximum(scale, 1.0 / (448.0 * 512.0))
@@ -79,8 +89,8 @@ def _silu_clamp_bf16_quant_2304(X, Q, S, LIMIT: tl.constexpr, LIGHTOP: tl.conste
     else:
         divided = tl.div_rn(value, scale)
         divided_tail = tl.div_rn(last, scale)
-    quant = tl.minimum(tl.maximum(divided, -448.0), 448.0)
-    quant_tail = tl.minimum(tl.maximum(divided_tail, -448.0), 448.0)
+    quant = tl.maximum(-448.0, tl.minimum(divided, 448.0))
+    quant_tail = tl.maximum(-448.0, tl.minimum(divided_tail, 448.0))
     if LIGHTOP:
         nan = tl.full((), 0xffc00000, tl.uint32).to(tl.float32, bitcast=True)
         quant = tl.where(divided != divided, nan, quant)
