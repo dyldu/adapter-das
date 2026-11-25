@@ -1,11 +1,11 @@
 # Copyright (c) 2026 Hygon Information Technology Co., Ltd.
 # SPDX-License-Identifier: Apache-2.0
-"""Research candidate producer: block maximum and native exact-rank TopK.
+"""Bounded decode candidate producer: block maximum and native exact-rank TopK.
 
 Fuse block scoring, causal bounds, newest-block pinning and IEEE key mapping.
 Only live blocks enter the ragged native selection. Candidate order is free;
 equal-score membership follows the native exact-rank contract, as in Top512.
-No production caller uses this path before HIP and model qualification.
+Other window and provider contracts retain the original implementation.
 """
 import torch
 import triton
@@ -65,7 +65,7 @@ def _candidate_native_output(Scores, Lengths, Selected, Out,
 
 
 def select_candidate_blocks_native(logits, ends, out, block_size):
-    """Research zero-based decode producer; decline other ABI/shape families."""
+    """Zero-based decode producer; decline other ABI/shape families."""
     if (torch.version.hip is None or not logits.is_cuda or logits.ndim != 2
             or logits.dtype != torch.float32 or logits.stride(1) != 1
             or logits.shape[0] <= 0 or logits.shape[1] <= 0
@@ -76,6 +76,7 @@ def select_candidate_blocks_native(logits, ends, out, block_size):
             or out.ndim != 2 or out.shape[0] != logits.shape[0]
             or out.shape[1] not in (512, 1024, 2048) or out.dtype != torch.int32
             or out.device != logits.device or any(s <= 0 for s in out.stride())
+            or out.stride(0) < (out.shape[1] - 1) * out.stride(1) + 1
             or any(t.is_neg() for t in (logits, ends, out))):
         return False
     if not _supported_device(logits.device.index):

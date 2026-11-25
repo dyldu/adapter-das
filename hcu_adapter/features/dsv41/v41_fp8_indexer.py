@@ -376,6 +376,16 @@ def build():
                         "indexer's CPU candidate path is not implemented")
                 try:
                     if bounded and not write and helper is apply_candidate_mask:
+                        # Bounded decode callers supply zero starts. Compact
+                        # only the admitted blocks before scanning logits;
+                        # decline without modifying logits when that adds work.
+                        from hcu_adapter.kernels.indexer_topk_compact_triton import select_topk_compact
+                        compact = select_topk_compact(
+                            logits, starts, ends, out.shape[1],
+                            candidates=candidates, block_size=block_size)
+                        if compact is not None:
+                            out.copy_(compact)
+                            return
                         from hcu_adapter.kernels.indexer_topk_lightop import select_topk
                         fused = select_topk(
                             logits, starts, ends, out.shape[1], valid_lengths=ends,
@@ -384,8 +394,14 @@ def build():
                             out.copy_(fused)
                             return
                     if write:
-                        helper(logits, starts, ends, candidates.shape[1],
-                               block_size, candidates)
+                        produced = False
+                        if bounded and helper is select_candidate_blocks:
+                            from hcu_adapter.kernels.indexer_candidate_native_triton import select_candidate_blocks_native
+                            produced = select_candidate_blocks_native(
+                                logits, ends, candidates, block_size)
+                        if not produced:
+                            helper(logits, starts, ends, candidates.shape[1],
+                                   block_size, candidates)
                     else:
                         masked = False
                         if bounded and helper is apply_candidate_mask:

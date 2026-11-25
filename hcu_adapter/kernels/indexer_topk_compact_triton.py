@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Hygon Information Technology Co., Ltd.
 # SPDX-License-Identifier: Apache-2.0
-"""Experimental candidate-only exact TopK; no production caller until qualified.
+"""Candidate-only exact TopK for zero-based bounded decode windows.
 
 Sort and deduplicate candidate blocks on device, gather their live logits into
 a bounded score bank, and map native TopK output back to original columns.
@@ -70,17 +70,17 @@ def _compact_topk_scores(X, Ends, Blocks, Lengths, Scores,
 
 
 def select_topk_compact(logits, starts, ends, k, *, candidates, block_size):
-    """Candidate-prefix prototype, declining shapes without reduced work.
+    """Select a zero-based live prefix, declining shapes without reduced work.
 
-    This callable is deliberately separate from select_topk: the entire frozen
-    serving experiment continues to use the previously qualified implementation.
+    The caller establishes that starts are zero from decode metadata. Prefill
+    windows, including windows with nonzero starts, retain the original path.
     """
     if (torch.version.hip is None or not logits.is_cuda or logits.ndim != 2
             or logits.dtype != torch.float32 or logits.stride(1) != 1
             or logits.stride(0) < logits.shape[1] or k not in (512, 1024, 2048)
             or logits.shape[0] <= 0 or logits.shape[1] <= 0
             or logits.shape[1] > 2147483647
-            or type(block_size) is not int or block_size <= 0
+            or type(block_size) is not int or not 0 < block_size <= 128
             or starts.shape != logits.shape[:1] or ends.shape != starts.shape
             or starts.dtype != torch.int32 or ends.dtype != torch.int32
             or not starts.is_contiguous() or not ends.is_contiguous()

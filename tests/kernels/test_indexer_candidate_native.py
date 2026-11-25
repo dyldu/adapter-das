@@ -90,6 +90,9 @@ def test_hip_exact_ranks_and_graph_replay(rows, width, k, block_size):
     def fill(turn):
         torch.manual_seed(251125 + turn)
         x.normal_()
+        x[:, :8] = torch.tensor(
+            [0., -0., float('nan'), float('inf'), -float('inf'), 1., -1., 2.],
+            device='cuda')
         ends.copy_((torch.arange(rows, device="cuda") * 37 + width - turn) % (width + 1))
         ends[0] = width
         if rows > 1:
