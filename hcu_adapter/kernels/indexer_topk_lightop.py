@@ -71,10 +71,23 @@ def _topk_live_scores(X, Ends, Scores, Offsets, Flags,
 def _topk_native_output(X, Indices, Starts, Ends, Out, Flags,
                         WIDTH: tl.constexpr, XROW: tl.constexpr,
                         K: tl.constexpr, MASK_CANDIDATES: tl.constexpr = False,
-                        NBLOCKS: tl.constexpr = 0, BLOCK_SIZE: tl.constexpr = 1):
+                        NBLOCKS: tl.constexpr = 0, BLOCK_SIZE: tl.constexpr = 1,
+                        COMPACT: tl.constexpr = False, MAP_PITCH: tl.constexpr = 0):
     row = tl.program_id(0).to(tl.int64)
     lane = tl.arange(0, K)
     idx = tl.load(Indices + row * K + lane)
+    if COMPACT:
+        # The compact input has unique blocks in ascending logical order.
+        # The edge sentinel admits only the last physical score column.
+        block = tl.load(Flags + row * MAP_PITCH + idx // BLOCK_SIZE,
+                        (idx >= 0) & (idx < MAP_PITCH * BLOCK_SIZE), other=-1)
+        offset = idx % BLOCK_SIZE
+        idx = tl.where(block == NBLOCKS,
+                       tl.where(offset == 0, WIDTH - 1, -1),
+                       tl.where(block >= 0, block * BLOCK_SIZE + offset, -1))
+        # A partial final block contains compact padding. Never reinterpret
+        # its -inf selection slots using an unwritten/poisoned source tail.
+        idx = tl.where(idx < tl.minimum(tl.load(Ends + row), WIDTH), idx, -1)
     value = tl.load(X + row * XROW + idx, (idx >= 0) & (idx < WIDTH), other=-float('inf'))
     invalid = (idx < 0) | (idx >= WIDTH) | (value == -float('inf'))
     if MASK_CANDIDATES:
