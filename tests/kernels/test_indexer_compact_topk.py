@@ -7,7 +7,8 @@ import pytest
 import torch
 
 from hcu_adapter.kernels.indexer_topk_compact_triton import (
-    _compact_candidate_blocks, _compact_topk_scores, select_topk_compact,
+    _compact_candidate_blocks, _compact_topk_scores,
+    _compact_blocks_and_short_output, select_topk_compact,
 )
 from hcu_adapter.kernels.indexer_topk_lightop import _topk_native_output, select_topk
 
@@ -48,6 +49,31 @@ def _oracle(row, length, candidates, block_size, k):
 
         ids.sort(key=output_key, reverse=True)
     return torch.tensor(ids + [-1] * (k - len(ids)), dtype=torch.int32)
+
+
+@pytest.mark.skipif(os.environ.get('TRITON_INTERPRET') != '1', reason='CPU Triton interpreter')
+@pytest.mark.parametrize('width,block_size,count', [(257, 8, 64), (65539, 8, 2048), (65539, 17, 129)])
+def test_short_prefix_direct_output_interpreted(width, block_size, count):
+    rows, k = 3, 512
+    torch.manual_seed(251125)
+    x = torch.randn(rows, width)
+    x[:, :4] = torch.tensor([float('nan'), -float('inf'), float('inf'), -0.])
+    ends = torch.tensor([min(width, 257), 0, min(width, k)], dtype=torch.int32)
+    candidates = torch.randint(-1, (width + block_size - 1)//block_size + 3, (rows, count), dtype=torch.int32)
+    candidates[:, :4] = torch.tensor([0, 0, -1, 2**30], dtype=torch.int32)
+    mapping = torch.empty_like(candidates)
+    lengths, offsets = torch.empty(rows, dtype=torch.int32), torch.empty(rows, dtype=torch.int32)
+    pitch = ((count * block_size + 3)//4)*4
+    scores = torch.full((rows, pitch), float('nan'))
+    output = torch.full((rows, k), -9876, dtype=torch.int32)
+    _compact_blocks_and_short_output[(rows,)](
+        x, candidates, ends, mapping, lengths, offsets, output,
+        width, x.stride(0), block_size, count, 1 << (count - 1).bit_length(),
+        *candidates.stride(), k, 1 << ((k + block_size - 1)//block_size).bit_length(), num_warps=4)
+    assert torch.count_nonzero(lengths) == torch.count_nonzero(offsets) == 0
+    assert torch.isnan(scores).all()
+    for row in range(rows):
+        torch.testing.assert_close(output[row], _oracle(x[row], int(ends[row]), candidates[row], block_size, k), rtol=0, atol=0)
 
 
 @pytest.mark.skipif(os.environ.get('TRITON_INTERPRET') != '1', reason='CPU Triton interpreter')
