@@ -13,6 +13,7 @@ import triton
 import triton.language as tl
 
 from .indexer_topk_post_triton import _supported_device
+from .indexer_live_mask_triton import _live_flags
 
 
 @triton.jit
@@ -38,9 +39,11 @@ def _topk_native_scores(X, Scores, Lengths, Offsets,
 
 
 @triton.jit
-def _topk_live_scores(X, Ends, Scores, Offsets,
+def _topk_live_scores(X, Ends, Scores, Offsets, Flags,
                       WIDTH: tl.constexpr, PITCH: tl.constexpr,
-                      XROW: tl.constexpr, BLOCK: tl.constexpr):
+                      XROW: tl.constexpr, BLOCK: tl.constexpr,
+                      MASK_CANDIDATES: tl.constexpr = False,
+                      NBLOCKS: tl.constexpr = 0, BLOCK_SIZE: tl.constexpr = 1):
     row = tl.program_id(0).to(tl.int64)
     length = tl.minimum(tl.load(Ends + row), WIDTH)
     if tl.program_id(1) == 0:
@@ -48,6 +51,12 @@ def _topk_live_scores(X, Ends, Scores, Offsets,
     for tile in range(tl.program_id(1), tl.cdiv(length, BLOCK), tl.num_programs(1)):
         col = tile * BLOCK + tl.arange(0, BLOCK)
         value = tl.load(X + row * XROW + col, col < length, other=-float('inf'))
+        if MASK_CANDIDATES:
+            keep = tl.load(Flags + row * (NBLOCKS + 1) + col // BLOCK_SIZE,
+                           col < length, other=0) != 0
+            edge = tl.load(Flags + row * (NBLOCKS + 1) + NBLOCKS) != 0
+            keep = keep | ((col == WIDTH - 1) & edge)
+            value = tl.where(keep, value, -float('inf'))
         bits = value.to(tl.uint32, bitcast=True)
         negative = (bits & 0x80000000) != 0
         zero = (bits & 0x7fffffff) == 0
@@ -59,14 +68,20 @@ def _topk_live_scores(X, Ends, Scores, Offsets,
 
 
 @triton.jit
-def _topk_native_output(X, Indices, Starts, Ends, Out,
+def _topk_native_output(X, Indices, Starts, Ends, Out, Flags,
                         WIDTH: tl.constexpr, XROW: tl.constexpr,
-                        K: tl.constexpr):
+                        K: tl.constexpr, MASK_CANDIDATES: tl.constexpr = False,
+                        NBLOCKS: tl.constexpr = 0, BLOCK_SIZE: tl.constexpr = 1):
     row = tl.program_id(0).to(tl.int64)
     lane = tl.arange(0, K)
     idx = tl.load(Indices + row * K + lane)
     value = tl.load(X + row * XROW + idx, (idx >= 0) & (idx < WIDTH), other=-float('inf'))
     invalid = (idx < 0) | (idx >= WIDTH) | (value == -float('inf'))
+    if MASK_CANDIDATES:
+        keep = tl.load(Flags + row * (NBLOCKS + 1) + idx // BLOCK_SIZE,
+                       (idx >= 0) & (idx < WIDTH), other=0) != 0
+        edge = tl.load(Flags + row * (NBLOCKS + 1) + NBLOCKS) != 0
+        invalid = invalid | ~(keep | ((idx == WIDTH - 1) & edge))
     start, end = tl.load(Starts + row), tl.load(Ends + row)
     if end - start <= K:
         ordered = tl.sort(tl.where(invalid, 2147483647, idx), descending=False)
@@ -85,13 +100,17 @@ def _topk_native_output(X, Indices, Starts, Ends, Out,
     tl.store(Out + row * K + lane, result)
 
 
-def select_topk(logits, starts, ends, k, *, valid_lengths=None):
+def select_topk(logits, starts, ends, k, *, valid_lengths=None,
+                candidates=None, block_size=0):
     """Select exact ranks, returning None outside the native contract.
 
     The default retains global Top512 semantics. ``valid_lengths`` declares
     fully materialized zero-based score prefixes; other columns may be
     uninitialized. Those prefixes use the native ragged Top512/1024/2048 ABI
     at any positive storage width and follow current device lengths on replay.
+    Optional decode candidates are masked while preparing scores; logits stay
+    unchanged. Candidate IDs use zero-based prefix columns, just like the
+    existing bounded decode mask. This removes its separate logits write/read.
     """
     if (torch.version.hip is None or not logits.is_cuda or logits.ndim != 2
             or logits.dtype != torch.float32 or logits.stride(1) != 1
@@ -109,6 +128,13 @@ def select_topk(logits, starts, ends, k, *, valid_lengths=None):
             valid_lengths.shape != ends.shape or valid_lengths.dtype != torch.int32
             or valid_lengths.device != logits.device or not valid_lengths.is_contiguous()):
         return None
+    if candidates is not None and (
+            valid_lengths is None or block_size <= 0
+            or candidates.ndim != 2 or candidates.shape[0] != logits.shape[0]
+            or candidates.shape[1] <= 0 or candidates.dtype != torch.int32
+            or candidates.device != logits.device or candidates.is_neg()
+            or any(s <= 0 for s in candidates.stride())):
+        return None
     if not _supported_device(logits.device.index):
         return None
     try:
@@ -123,6 +149,12 @@ def select_topk(logits, starts, ends, k, *, valid_lengths=None):
     offsets = torch.empty_like(lengths)
     indices = torch.empty((rows, k), dtype=torch.int32, device=logits.device)
     out = torch.empty_like(indices)
+    flags, blocks = offsets, 0
+    if candidates is not None:
+        blocks = triton.cdiv(width, block_size)
+        flags = torch.empty((rows, blocks + 1), dtype=torch.uint8, device=logits.device)
+        _live_flags[(rows,)](candidates, lengths, flags, width, blocks, block_size,
+                             *candidates.stride(), candidates.shape[1], 1024, num_warps=4)
     if valid_lengths is None:
         _topk_native_scores[(rows, triton.cdiv(pitch, 4096))](
             logits, scores, lengths, offsets,
@@ -130,9 +162,11 @@ def select_topk(logits, starts, ends, k, *, valid_lengths=None):
     else:
         sms = torch.cuda.get_device_properties(logits.device).multi_processor_count
         _topk_live_scores[(rows, min(triton.cdiv(pitch, 4096), triton.cdiv(sms, rows)))](
-            logits, lengths, scores, offsets,
-            width, pitch, logits.stride(0), 4096, num_warps=4)
+            logits, lengths, scores, offsets, flags,
+            width, pitch, logits.stride(0), 4096,
+            candidates is not None, blocks, max(1, block_size), num_warps=4)
     topk_transform_ragged_v2(scores, lengths, out_offsets=offsets, out_indices=indices)
-    _topk_native_output[(rows,)](logits, indices, starts, ends, out,
-        width, logits.stride(0), k, num_warps=4)
+    _topk_native_output[(rows,)](logits, indices, starts, ends, out, flags,
+        width, logits.stride(0), k,
+        candidates is not None, blocks, max(1, block_size), num_warps=4)
     return out

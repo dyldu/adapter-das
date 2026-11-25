@@ -375,6 +375,14 @@ def build():
                         "V41 candidate-block selection needs CUDA; the reference "
                         "indexer's CPU candidate path is not implemented")
                 try:
+                    if bounded and not write and helper is apply_candidate_mask:
+                        from hcu_adapter.kernels.indexer_topk_lightop import select_topk
+                        fused = select_topk(
+                            logits, starts, ends, out.shape[1], valid_lengths=ends,
+                            candidates=candidates, block_size=block_size)
+                        if fused is not None:
+                            out.copy_(fused)
+                            return
                     if write:
                         helper(logits, starts, ends, candidates.shape[1],
                                block_size, candidates)
